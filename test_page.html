@@ -1,0 +1,480 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Knee rehab app (prototype)</title>
+<style>
+  :root{
+    --bg:#f5f3ee; --card:#ffffff; --ink:#1f1d1a; --muted:#6b675f; --line:#e4e0d6;
+    --accent:#2f6f5e; --accent-soft:#e3efe9; --warn:#b26a00; --warn-soft:#fbefd9;
+    --bad:#b23a2e; --bad-soft:#f8e3e0; --pt:#5b4bb0; --pt-soft:#ebe8f8; --code:#f8f6f1; --radius:14px;
+    --mono: ui-monospace, "Cascadia Code", Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{ --bg:#141412; --card:#1e1d1a; --ink:#ece9e2; --muted:#a29d92; --line:#33312c;
+      --accent:#6fc3a8; --accent-soft:#1f3830; --warn:#e7a948; --warn-soft:#3a2d16;
+      --bad:#f08a7e; --bad-soft:#3d201c; --pt:#ada2f0; --pt-soft:#2a2640; --code:#171614; }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 "Segoe UI",system-ui,sans-serif}
+  header{padding:20px 32px 0;display:flex;align-items:center;gap:18px;flex-wrap:wrap}
+  h1{font-size:21px;margin:0;font-weight:650;letter-spacing:-.01em}
+  .pidbox{display:flex;align-items:center;gap:8px;margin-left:auto}
+  .pidbox input{width:140px}
+  nav{display:flex;gap:6px;padding:16px 32px 0;border-bottom:1px solid var(--line)}
+  nav button{background:none;border:0;border-bottom:2px solid transparent;border-radius:0;padding:10px 14px;color:var(--muted);font-weight:600}
+  nav button.on{color:var(--ink);border-bottom-color:var(--accent)}
+  .tab{display:none}
+  .tab.on{display:grid}
+  main{grid-template-columns:1fr 1fr;gap:18px;padding:18px 32px 32px}
+  main.wide{grid-template-columns:minmax(280px,1fr) minmax(360px,1.35fr)}
+  .full{grid-column:1/-1}
+  @media (max-width:900px){main,main.wide{grid-template-columns:1fr;padding:14px}}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:20px 22px;align-self:start}
+  .card.ptcard{border-top:4px solid var(--pt)}
+  .card.patcard{border-top:4px solid var(--accent)}
+  .who{font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;margin-bottom:4px}
+  .ptcard .who{color:var(--pt)} .patcard .who{color:var(--accent)}
+  .step{display:flex;align-items:center;gap:10px;margin-bottom:14px}
+  .num{width:26px;height:26px;border-radius:50%;background:var(--accent);color:#fff;display:grid;place-items:center;font-weight:650;font-size:13px}
+  h2{font-size:17px;margin:0 0 10px;font-weight:650}
+  .step h2{margin:0;font-size:16px}
+  h3{font-size:14px;margin:18px 0 6px;font-weight:650}
+  label{display:block;font-size:13px;color:var(--muted);margin:12px 0 5px}
+  input[type=text],input[type=number],input[type=date],select,textarea{width:100%;padding:9px 11px;border:1px solid var(--line);border-radius:9px;background:var(--card);color:var(--ink);font:inherit}
+  textarea{font:13px/1.55 var(--mono);background:var(--code);min-height:200px;resize:vertical}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:0 14px}
+  .row{display:flex;gap:10px;align-items:center}
+  .row > *{flex:1}
+  .chips{display:flex;flex-wrap:wrap;gap:6px}
+  .chips label{margin:0;display:inline-flex;align-items:center;gap:6px;padding:6px 11px;border:1px solid var(--line);border-radius:999px;color:var(--ink);font-size:13.5px;cursor:pointer}
+  .chips input{accent-color:var(--accent);margin:0}
+  .slider{display:flex;align-items:center;gap:12px}
+  .slider input{flex:1;accent-color:var(--accent)}
+  .val{min-width:44px;text-align:center;font-weight:650;padding:3px 8px;border-radius:8px;background:var(--accent-soft);color:var(--accent)}
+  button{font:inherit;font-weight:600;border:0;border-radius:10px;padding:10px 16px;cursor:pointer}
+  .primary{background:var(--accent);color:#fff}
+  .ptbtn{background:var(--pt);color:#fff}
+  .ghost{background:transparent;border:1px solid var(--line);color:var(--ink)}
+  .small{padding:6px 10px;font-size:13px}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  .actions{display:flex;gap:10px;margin-top:16px;flex-wrap:wrap}
+  .banner{margin-top:14px;padding:10px 14px;border-radius:10px;font-weight:600}
+  .ok{background:var(--accent-soft);color:var(--accent)}
+  .warnb{background:var(--warn-soft);color:var(--warn)}
+  .badb{background:var(--bad-soft);color:var(--bad)}
+  .ptb{background:var(--pt-soft);color:var(--pt)}
+  .plan{list-style:none;padding:0;margin:12px 0 0;display:grid;gap:8px}
+  .plan li{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:11px 14px;border:1px solid var(--line);border-radius:10px}
+  .plan.pick li{cursor:pointer}
+  .plan li.sel{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-soft)}
+  .plan small{color:var(--muted)}
+  .dose{white-space:nowrap}
+  .dose s{color:var(--muted);margin-right:6px}
+  .io{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:16px}
+  @media (max-width:700px){.io,.grid2{grid-template-columns:1fr}}
+  pre{margin:0;font:12px/1.5 var(--mono);background:var(--code);border:1px solid var(--line);border-radius:10px;padding:12px;overflow:auto;max-height:260px;white-space:pre-wrap}
+  pre.summary{font:14px/1.6 "Segoe UI",system-ui,sans-serif;max-height:none}
+  .tag{font-size:12px;font-weight:650;padding:2px 8px;border-radius:6px;white-space:nowrap}
+  table{width:100%;border-collapse:collapse;font-size:14px}
+  th{text-align:left;color:var(--muted);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.04em;padding:8px 10px;border-bottom:1px solid var(--line)}
+  td{padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+  th.n,td.n{text-align:right;font-variant-numeric:tabular-nums}
+  td input[type=number]{width:52px;padding:5px 6px}
+  .prop{display:flex;align-items:center;gap:4px;white-space:nowrap;margin-top:6px}
+  td.n{white-space:nowrap}
+  td select{width:auto;padding:5px 7px}
+  .reason{color:var(--muted);font-size:13px}
+  .empty{color:var(--muted);padding:10px 0}
+  .alerts{margin-top:14px;display:grid;gap:6px}
+  .hint{font-size:13px;color:var(--muted);margin-top:8px}
+  code{font-family:var(--mono);font-size:12.5px;background:var(--code);padding:1px 5px;border-radius:5px}
+  .camera{border:2px dashed var(--line);border-radius:12px;aspect-ratio:16/9;display:grid;place-items:center;color:var(--muted);text-align:center;padding:20px}
+  .dir{display:inline-block;font-weight:700;font-size:13px;padding:3px 10px;border-radius:999px;margin-right:8px}
+  .expl{background:var(--code);border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin:10px 0;line-height:1.6}
+  .edit-on .ro{display:none} .ro-edit{display:none} .edit-on .ro-edit{display:flex}
+  .stats{display:flex;gap:10px;flex-wrap:wrap;margin:6px 0 4px}
+  .stat{border:1px solid var(--line);border-radius:10px;padding:8px 12px;min-width:110px}
+  .stat b{display:block;font-size:18px}
+  .stat span{font-size:12px;color:var(--muted)}
+</style>
+</head>
+<body>
+<header>
+  <h1>Knee rehab app <span style="color:var(--muted);font-weight:400">· prototype</span></h1>
+  <div class="pidbox"><label for="pid" style="margin:0">Patient ID</label><input type="text" id="pid" value="u_test"></div>
+</header>
+<nav>
+  <button data-tab="t1" class="on">1 · Intake</button>
+  <button data-tab="t2">2 · Daily exercise</button>
+  <button data-tab="t3">3 · Plan</button>
+</nav>
+
+<!-- ============ TAB 1: INTAKE ============ -->
+<main class="tab on" id="t1">
+  <section class="card patcard">
+    <div class="who">Patient</div>
+    <h2>Tell us about your knee</h2>
+    <div class="grid2">
+      <div><label for="i_name">Name</label><input type="text" id="i_name" value="Walter M."></div>
+      <div><label for="i_age">Age</label><input type="number" id="i_age" value="76" min="18" max="110"></div>
+      <div><label for="i_act">Most of your day is spent…</label>
+        <select id="i_act"><option>sitting or desk work</option><option>standing</option><option>walking</option><option>a mix of these</option></select></div>
+      <div><label for="i_aid">Walking aid</label><select id="i_aid"><option>none</option><option selected>cane</option><option>walker</option></select></div>
+    </div>
+    <label>Where does it hurt?</label>
+    <div class="chips" data-name="pain_locations">
+      <label><input type="checkbox" value="front" checked>Front</label><label><input type="checkbox" value="back">Back</label>
+      <label><input type="checkbox" value="inner side">Inner side</label><label><input type="checkbox" value="outer side">Outer side</label>
+      <label><input type="checkbox" value="above the knee">Above the knee</label><label><input type="checkbox" value="below the knee">Below the knee</label>
+      <label><input type="checkbox" value="whole knee">Whole knee</label></div>
+    <label>What does it feel like?</label>
+    <div class="chips" data-name="pain_type">
+      <label><input type="checkbox" value="dull ache" checked>Dull ache</label><label><input type="checkbox" value="sharp">Sharp</label>
+      <label><input type="checkbox" value="burning">Burning</label><label><input type="checkbox" value="stiff">Stiff</label></div>
+    <div class="grid2">
+      <div><label for="i_dur">How long?</label>
+        <select id="i_dur"><option>under 2 weeks</option><option selected>2–6 weeks</option><option>6 weeks–3 months</option><option>over 3 months</option></select></div>
+      <div><label for="i_pat">Is it…</label><select id="i_pat"><option>there all the time</option><option selected>on and off</option></select></div>
+    </div>
+    <label>When is it worst?</label>
+    <div class="chips" data-name="time_of_day">
+      <label><input type="checkbox" value="morning">Morning</label><label><input type="checkbox" value="after activity" checked>After activity</label>
+      <label><input type="checkbox" value="evening">Evening</label><label><input type="checkbox" value="night">Night</label></div>
+    <label>What makes it worse?</label>
+    <div class="chips" data-name="worse_with">
+      <label><input type="checkbox" value="stairs" checked>Stairs</label><label><input type="checkbox" value="squatting or kneeling">Squatting or kneeling</label>
+      <label><input type="checkbox" value="sitting a long time">Sitting a long time</label><label><input type="checkbox" value="walking">Walking</label>
+      <label><input type="checkbox" value="getting up from a chair" checked>Getting up from a chair</label></div>
+    <label for="i_better">What makes it better?</label><input type="text" id="i_better" value="Rest and ice">
+    <div class="grid2">
+      <div><label>Pain right now</label><div class="slider"><input type="range" id="i_now" min="0" max="10" value="4"><span class="val" id="i_nowv">4</span></div></div>
+      <div><label>Worst pain this week</label><div class="slider"><input type="range" id="i_worst" min="0" max="10" value="6"><span class="val" id="i_worstv">6</span></div></div>
+      <div><label for="i_numb">Any numbness or tingling?</label><select id="i_numb"><option>no</option><option>yes</option></select></div>
+      <div><label for="i_side">Which knee?</label><select id="i_side"><option>left</option><option>right</option></select></div>
+      <div><label for="i_surg">Knee surgery?</label><select id="i_surg"><option>none</option><option selected>total knee replacement</option><option>ACL repair</option><option>other</option></select></div>
+      <div><label for="i_sdate">Surgery date</label><input type="date" id="i_sdate" value="2026-10-28"></div>
+    </div>
+    <label for="i_goal">What do you most want to get back to?</label><select id="i_goal" class="goalsel"></select>
+    <label>What do you have at home?</label>
+    <div class="chips" data-name="home_equipment">
+      <label><input type="checkbox" value="sturdy chair" checked>Sturdy chair</label><label><input type="checkbox" value="step or stairs" checked>Step or stairs</label>
+      <label><input type="checkbox" value="bed" checked>Bed</label><label><input type="checkbox" value="floor space">Floor space</label>
+      <label><input type="checkbox" value="exercise bike">Exercise bike</label></div>
+    <label for="i_floor">Can you get down to the floor and back up safely?</label><select id="i_floor"><option>no</option><option>yes</option></select>
+    <div class="actions"><button class="primary" id="i_send">Send to my PT</button></div>
+    <div id="i_msg"></div>
+  </section>
+
+  <section class="card ptcard">
+    <div class="who">Physical therapist</div>
+    <h2>Before the first visit</h2>
+    <div class="row"><h3 style="margin:0">Intake summary</h3><div style="flex:0 0 auto"><button class="ghost small" id="pt_refresh1">Refresh</button></div></div>
+    <pre class="summary" id="pt_summary" style="margin-top:8px">No intake yet for this patient.</pre>
+    <h3>Initial plan, after the in-person assessment</h3>
+    <table><thead><tr><th>Exercise</th><th class="n">Sets</th><th class="n">Reps</th><th></th></tr></thead><tbody id="pt_rows"></tbody></table>
+    <div class="actions" style="margin-top:10px"><button class="ghost small" id="pt_add">Add exercise</button></div>
+    <label for="pt_name">PT name</label><input type="text" id="pt_name" value="Dana Reyes, DPT">
+    <div class="actions"><button class="ptbtn" id="pt_save">Save plan</button></div>
+    <div id="pt_msg"></div>
+  </section>
+</main>
+
+<!-- ============ TAB 2: DAILY EXERCISE ============ -->
+<main class="tab wide" id="t2">
+  <section class="card">
+    <div class="step"><span class="num">1</span><h2>Start today's session</h2></div>
+    <label for="loc">Where does your knee hurt today?</label>
+    <select id="loc">
+      <option value="none">No pain</option><option value="front">Front</option><option value="back">Back</option>
+      <option value="inner">Inner side</option><option value="outer">Outer side</option><option value="whole knee">Whole knee</option>
+    </select>
+    <label>How much does it hurt today? (0 = none, 10 = worst)</label>
+    <div class="slider"><input type="range" id="pain" min="0" max="10" value="2"><span class="val" id="painv">2</span></div>
+    <div class="actions"><button class="primary" id="start">Start session</button><button class="ghost" id="seed">Load test patient</button></div>
+    <div id="banner"></div>
+    <ul class="plan pick" id="plan"></ul>
+    <p class="hint" id="planhint"></p>
+  </section>
+
+  <section class="card">
+    <div class="step"><span class="num">2</span><h2>Camera and detection</h2></div>
+    <div class="camera">Camera view goes here<br><small>Pose model, live cues and rep counter will be added. For now, simulate the detection output below.</small></div>
+    <label for="json">Detection JSON (sent to <code>POST /api/result</code>)</label>
+    <textarea id="json" spellcheck="false" placeholder="Start a session and pick an exercise first."></textarea>
+    <label>Pain after this exercise (asked by the app, added to the request)</label>
+    <div class="slider"><input type="range" id="after" min="0" max="10" value="3"><span class="val" id="afterv">3</span></div>
+    <div class="actions">
+      <button class="ghost" id="sim" disabled>Simulate detection</button>
+      <button class="ghost" id="bad" disabled>Simulate a broken result</button>
+      <button class="primary" id="send" disabled>Send to node</button>
+    </div>
+    <div class="io">
+      <div><label>Request sent</label><pre id="req">—</pre></div>
+      <div><label>Node response <span id="status"></span></label><pre id="res">—</pre></div>
+    </div>
+  </section>
+
+  <section class="card full">
+    <div class="step"><span class="num">3</span><h2>What the node stored</h2></div>
+    <div id="table"></div>
+    <div class="alerts" id="alerts"></div>
+  </section>
+</main>
+
+<!-- ============ TAB 3: PLAN ============ -->
+<main class="tab" id="t3">
+  <section class="card patcard">
+    <div class="who">Patient</div>
+    <h2>My plan</h2>
+    <div id="my_change"></div>
+    <h3>This week's exercises</h3>
+    <ul class="plan" id="my_plan"></ul>
+    <h3>My goal</h3>
+    <div class="row"><select id="my_goal" class="goalsel"></select><div style="flex:0 0 auto"><button class="primary" id="my_goal_save">Save goal</button></div></div>
+    <p class="hint">Changing your goal makes a new plan for your PT to check.</p>
+    <div id="my_msg"></div>
+  </section>
+
+  <section class="card ptcard">
+    <div class="who">Physical therapist</div>
+    <h2>Weekly plan review</h2>
+    <p class="hint" style="margin-top:0">In the real app the draft is made automatically at the end of each week. For testing, make it here.</p>
+    <div class="actions" style="margin-top:4px">
+      <button class="ghost small" id="rv_demo">Load a demo week for this patient</button>
+      <button class="ghost small" id="rv_draft">Make this week's draft</button>
+      <button class="ghost small" id="rv_refresh">Refresh</button>
+    </div>
+    <div id="rv_body"><p class="empty">No draft waiting for review.</p></div>
+    <div id="rv_msg"></div>
+  </section>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const pid = () => $("pid").value.trim();
+const pretty = o => JSON.stringify(o, null, 2).replace(/\[\s+([\d.,\s-]+?)\s+\]/g, (m, inner) => "[" + inner.replace(/\s+/g, " ").trim() + "]");
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const banner = (cls, html) => `<div class="banner ${cls}">${html}</div>`;
+const api = async (path, body) => {
+  const r = await fetch(path, body ? {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)} : {});
+  return {status:r.status, data:await r.json()};
+};
+const errText = d => (d.errors || [d.error || "Something went wrong"]).map(esc).join("<br>");
+let EX = {}, GOALS = [];
+
+// ---------- tabs ----------
+document.querySelectorAll("nav button").forEach(b => b.onclick = () => {
+  document.querySelectorAll("nav button").forEach(x => x.classList.toggle("on", x === b));
+  document.querySelectorAll(".tab").forEach(t => t.classList.toggle("on", t.id === b.dataset.tab));
+  refreshTab(b.dataset.tab);
+});
+function refreshTab(t){ if (t === "t1") loadIntake(); if (t === "t2") loadDb(); if (t === "t3"){ loadMyPlan(); loadReview(); } }
+$("pid").onchange = () => refreshTab(document.querySelector("nav button.on").dataset.tab);
+const bindVal = (s, v) => $(s).oninput = e => $(v).textContent = e.target.value;
+bindVal("i_now","i_nowv"); bindVal("i_worst","i_worstv"); bindVal("pain","painv"); bindVal("after","afterv");
+
+// ---------- TAB 1: intake (patient) ----------
+const chips = name => [...document.querySelectorAll(`.chips[data-name="${name}"] input:checked`)].map(i => i.value);
+$("i_send").onclick = async () => {
+  const answers = {
+    age:+$("i_age").value, daily_activity:"mostly " + $("i_act").value, walking_aid:$("i_aid").value,
+    pain_locations:chips("pain_locations"), pain_type:chips("pain_type"), duration:$("i_dur").value,
+    pain_pattern:$("i_pat").value, time_of_day:chips("time_of_day"), worse_with:chips("worse_with"),
+    better_with:$("i_better").value, pain_now:+$("i_now").value, pain_worst:+$("i_worst").value,
+    numbness:$("i_numb").value, side:$("i_side").value, surgery:$("i_surg").value,
+    surgery_date:$("i_surg").value === "none" ? "" : $("i_sdate").value, goal:$("i_goal").value,
+    home_equipment:chips("home_equipment"), can_get_to_floor:$("i_floor").value,
+  };
+  const {data} = await api("/api/intake", {patient_id:pid(), name:$("i_name").value, answers});
+  $("i_msg").innerHTML = data.ok ? banner("ok", "Sent to your PT. They'll go through it with you at your first visit.") : banner("badb", errText(data));
+  loadIntake();
+};
+
+// ---------- TAB 1: PT ----------
+async function loadIntake(){
+  const {data} = await api("/api/intake?patient_id=" + encodeURIComponent(pid()));
+  $("pt_summary").textContent = data.intake ? data.intake.summary + `\n\n(received ${data.intake.created_at})` : "No intake yet for this patient.";
+  const plan = (await api("/api/plan?patient_id=" + encodeURIComponent(pid()))).data.plan;
+  $("pt_rows").innerHTML = "";
+  (plan.length ? plan : [{exercise_id:"heel_slide",sets:3,reps:10},{exercise_id:"sit_to_stand",sets:3,reps:10},{exercise_id:"mini_squat",sets:3,reps:10}]).forEach(addRow);
+}
+function addRow(it = {exercise_id:"heel_slide", sets:3, reps:10}){
+  const tr = document.createElement("tr");
+  tr.innerHTML = `<td><select>${Object.entries(EX).map(([id,n]) => `<option value="${id}" ${id===it.exercise_id?"selected":""}>${esc(n)}</option>`).join("")}</select></td>
+    <td class="n"><input type="number" min="1" max="5" value="${it.sets}"></td>
+    <td class="n"><input type="number" min="1" max="30" value="${it.reps}"></td>
+    <td class="n"><button class="ghost small" title="Remove">✕</button></td>`;
+  tr.querySelector("button").onclick = () => tr.remove();
+  $("pt_rows").appendChild(tr);
+}
+$("pt_add").onclick = () => addRow();
+$("pt_refresh1").onclick = loadIntake;
+$("pt_save").onclick = async () => {
+  const items = [...$("pt_rows").querySelectorAll("tr")].map(tr => {
+    const [sel, s, r] = tr.querySelectorAll("select, input");
+    return {exercise_id:sel.value, sets:+s.value, reps:+r.value};
+  });
+  const {data} = await api("/api/plan", {patient_id:pid(), items, pt_name:$("pt_name").value});
+  $("pt_msg").innerHTML = data.ok ? banner("ptb", `Plan saved: ${data.plan.map(p => `${esc(p.exercise_name)} ${p.sets} × ${p.reps}`).join(", ")}. The patient sees it in tab 2 and 3.`) : banner("badb", errText(data));
+};
+
+// ---------- TAB 2: daily exercise ----------
+let session = null, selected = null;
+$("seed").onclick = async () => {
+  const {data} = await api("/api/test-patient", {patient_id:pid()});
+  $("banner").innerHTML = banner("ok", `Test patient ready with ${data.plan.length} exercises from the PT.`);
+  loadDb();
+};
+$("start").onclick = async () => {
+  const {data} = await api("/api/checkin", {patient_id:pid(), pain_today:+$("pain").value, pain_location:$("loc").value});
+  if (!data.ok) { $("banner").innerHTML = banner("badb", errText(data)); return; }
+  session = data; selected = null;
+  const cls = {as_planned:"ok", reduced:"warnb", rest:"badb"}[data.action];
+  $("banner").innerHTML = banner(cls, `${esc(data.message)} <span style="font-weight:400">· check-in #${data.checkin_id}</span>`);
+  $("plan").innerHTML = data.action === "rest" ? "" : data.exercises.map((e,i) => `
+    <li data-i="${i}"><span><b>${esc(e.exercise_name)}</b> <small>${e.exercise_id}</small></span>
+    <span class="dose">${e.target_reps !== e.planned_reps ? `<s>${e.sets} × ${e.planned_reps}</s>` : ""}${e.sets} × ${e.target_reps}</span></li>`).join("");
+  $("planhint").textContent = data.action === "rest" ? "" : "Click an exercise to test it.";
+  document.querySelectorAll("#plan li").forEach(li => li.onclick = () => pick(+li.dataset.i));
+  if (data.action !== "rest") pick(0); else setButtons(false);
+  loadDb();
+};
+function pick(i){
+  selected = session.exercises[i];
+  document.querySelectorAll("#plan li").forEach(li => li.classList.toggle("sel", +li.dataset.i === i));
+  setButtons(true); simulate();
+}
+function setButtons(on){ ["sim","bad","send"].forEach(id => $(id).disabled = !on); }
+function simulate(){
+  const target = selected.sets * selected.target_reps;
+  const done = Math.max(1, target - Math.floor(Math.random()*3));
+  const base = 0.65 + Math.random()*0.25;
+  const scores = Array.from({length:done}, (_,k) => +Math.min(1, Math.max(0, base - k*0.004 + (Math.random()-.5)*0.12)).toFixed(2));
+  const errs = {}; const poor = scores.filter(s => s < 0.7).length;
+  if (poor) errs[["trunk_lean","too_fast","short_range"][Math.floor(Math.random()*3)]] = poor;
+  $("json").value = pretty({exercise_id:selected.exercise_id, sets_done:selected.sets, reps_done:done, form_scores:scores, error_counts:errs});
+}
+$("sim").onclick = simulate;
+$("bad").onclick = () => {
+  $("json").value = pretty({exercise_id:selected.exercise_id, sets_done:"three", reps_done:10, form_scores:[0.9, 1.4, 0.8], error_counts:{trunk_lean:-1}});
+};
+const tag = (kind, text) => `<span class="tag ${kind}">${text}</span>`;
+$("send").onclick = async () => {
+  let det;
+  try { det = JSON.parse($("json").value); }
+  catch(e){ $("res").textContent = "Your JSON doesn't parse: " + e.message; $("status").innerHTML = tag("badb","not sent"); return; }
+  const body = {checkin_id: session.checkin_id, ...det, pain_after: +$("after").value};
+  $("req").textContent = "POST /api/result\n\n" + pretty(body);
+  const {status, data} = await api("/api/result", body);
+  $("status").innerHTML = tag(data.ok ? "ok" : "badb", status + (data.ok ? " saved" : " rejected"));
+  $("res").textContent = pretty(data);
+  loadDb();
+};
+async function loadDb(){
+  const {data} = await api("/api/db?patient_id=" + encodeURIComponent(pid()));
+  $("table").innerHTML = data.logs.length ? `<table><thead><tr>
+    <th>#</th><th>Date</th><th>Exercise</th><th class="n">Plan</th><th class="n">Today's target</th><th class="n">Done</th><th class="n">Form</th><th>Errors</th><th class="n">Pain after</th></tr></thead><tbody>
+    ${data.logs.map(l => `<tr><td>${l.log_id}</td><td>${l.date}</td><td>${l.exercise_id}</td>
+      <td class="n">${l.planned_sets} × ${l.planned_reps}</td><td class="n">${l.planned_sets} × ${l.target_reps}</td>
+      <td class="n">${l.reps_done} reps</td><td class="n">${l.form_score ?? "—"}</td>
+      <td>${Object.entries(JSON.parse(l.errors_json||"{}")).map(([k,v]) => `${esc(k)} ×${v}`).join(", ") || "—"}</td>
+      <td class="n">${l.pain_after ?? "—"}</td></tr>`).join("")}</tbody></table>`
+    : `<p class="empty">Nothing stored yet for this patient.</p>`;
+  $("alerts").innerHTML = data.alerts.map(a => banner("badb", `Alert to PT · ${a.date} · ${esc(a.reason)}`)).join("");
+}
+
+// ---------- TAB 3: patient ----------
+const KIND = {new:["ok","New"], paused:["warnb","Paused"], changed:["ptb","Changed"], same:["ghost","Same"]};
+const DIR = {harder:["ok","Harder"], lighter:["warnb","Lighter"], mixed:["ptb","Mixed"], same:["ghost","Same"]};
+const dirTag = d => d ? `<span class="dir ${DIR[d][0]}">${DIR[d][1]}</span>` : "";
+const ACT = {progress:["ok","Step up"], add:["ok","New"], hold:["ghost","Same"], easier:["warnb","Lighter"], pause:["badb","Paused"]};
+async function loadMyPlan(){
+  const {data} = await api("/api/myplan?patient_id=" + encodeURIComponent(pid()));
+  if (data.patient && GOALS.some(g => g.key === data.patient.goal)) $("my_goal").value = data.patient.goal;
+  $("my_plan").innerHTML = data.plan.length ? data.plan.map(p => `<li><span><b>${esc(p.exercise_name)}</b></span><span>${p.sets} × ${p.reps}</span></li>`).join("")
+    : `<p class="empty">Your PT hasn't set your plan yet.</p>`;
+  const c = data.change;
+  $("my_change").innerHTML = !c ? "" : banner("ptb", `Your PT updated your exercises${c.pt_note ? ": “" + esc(c.pt_note) + "”" : "."}`) +
+    (c.explanation ? `<div class="expl">${dirTag(c.direction)}${esc(c.explanation)}</div>` : "") +
+    `<ul class="plan">${c.changes.map(x => `<li><span><span class="tag ${(ACT[x.action] || KIND[x.kind])[0]}">${(ACT[x.action] || KIND[x.kind])[1]}</span> <b>${esc(x.exercise_name)}</b>
+      <div class="reason">${x.kind === "same" ? "" : esc(x.reason)}</div></span>
+      <span class="dose">${x.before && x.before !== x.after ? `<s>${x.before.replace(" x ", " × ")}</s>` : ""}${x.after ? x.after.replace(" x ", " × ") : "1 week off"}</span></li>`).join("")}</ul>`;
+}
+$("my_goal_save").onclick = async () => {
+  const {data} = await api("/api/goal", {patient_id:pid(), goal:$("my_goal").value});
+  $("my_msg").innerHTML = !data.ok ? banner("badb", errText(data))
+    : (($("rv_msg").innerHTML = ""), banner("ok", data.drafted ? "Goal saved. A new plan for this goal was sent to your PT to check." : "Goal saved. Your PT will plan toward it after your first sessions."));
+  loadReview();
+};
+
+// ---------- TAB 3: PT review ----------
+let REQ = null;
+async function loadReview(){
+  const {data} = await api("/api/adjustment?patient_id=" + encodeURIComponent(pid()));
+  REQ = data.pending;
+  if (!REQ){ $("rv_body").innerHTML = `<p class="empty">No draft waiting for review.</p>`; return; }
+  const s = REQ.summary, d = REQ.draft;
+  const fmt = x => x ? x.replace(" x ", " × ") : "—";
+  $("rv_body").innerHTML = `
+    <h3>Week ${s.week.start} to ${s.week.end}${s.week_post_op != null ? ` · week ${s.week_post_op} after surgery` : ""}</h3>
+    <div class="stats">
+      <div class="stat"><b>${s.days_checked_in - s.days_rest}/7</b><span>days exercised</span></div>
+      <div class="stat"><b>${s.pain_today_avg ?? "—"}</b><span>avg pain before</span></div>
+      <div class="stat"><b>${s.days_reduced}</b><span>lighter days</span></div>
+      <div class="stat"><b>${s.alerts.length}</b><span>alerts</span></div>
+    </div>
+    <label>Goal</label><b>${esc(d.goal_label || s.goal_label)}</b>
+    <div class="expl">${dirTag(d.direction)}${esc(d.explanation)}</div>
+    ${d.note_for_pt ? banner("warnb", "For you: " + esc(d.note_for_pt)) : ""}
+    <h3>New plan</h3>
+    <div id="rv_tbl"><table><thead><tr><th>Exercise</th><th class="n">Now</th><th class="n">New</th><th>Change</th></tr></thead>
+    <tbody>${d.items.map((it,i) => `<tr data-i="${i}">
+      <td><b>${esc(it.exercise_name)}</b><div class="reason">${esc(it.reason)}</div></td>
+      <td class="n">${fmt(it.before)}</td>
+      <td class="n"><span class="ro">${+it.sets === 0 ? "paused" : `${it.sets} × ${it.reps}`}</span>
+        <span class="ro-edit prop"><input type="number" class="s" min="0" max="5" value="${it.sets}"> × <input type="number" class="r" min="0" max="15" value="${it.reps}"></span></td>
+      <td><span class="tag ${ACT[it.action][0]}">${ACT[it.action][1]}</span></td></tr>`).join("")}</tbody></table></div>
+    <p class="hint">Made by ${d.source === "llm" ? "the AI" : "rules (no AI yet)"}. The patient sees it only after you approve. <a href="#" id="rv_edit">Edit numbers first</a></p>
+    <div class="grid2"><div><label for="rv_name">PT name</label><input type="text" id="rv_name" value="Dana Reyes, DPT"></div>
+      <div><label for="rv_note">Note to the patient (optional)</label><input type="text" id="rv_note" placeholder="e.g. Great work on heel slides"></div></div>
+    <div class="actions"><button class="ptbtn" id="rv_ok">Approve and send to patient</button><button class="ghost" id="rv_no">Reject</button></div>`;
+  $("rv_edit").onclick = e => { e.preventDefault(); $("rv_tbl").classList.toggle("edit-on"); };
+  $("rv_ok").onclick = () => decide(true);
+  $("rv_no").onclick = () => decide(false);
+}
+async function decide(approve){
+  const editing = $("rv_tbl").classList.contains("edit-on");
+  const items = REQ.draft.items.map((it,i) => {
+    if (!editing) return it;
+    const tr = $("rv_tbl").querySelector(`tr[data-i="${i}"]`);
+    return {...it, sets:+tr.querySelector(".s").value, reps:+tr.querySelector(".r").value};
+  });
+  const {data} = await api("/api/adjustment/decide", {request_id:REQ.request_id, approve, items, pt_name:$("rv_name").value, note:$("rv_note").value});
+  $("rv_msg").innerHTML = data.ok ? banner("ptb", approve ? `Approved${data.pt_edited ? " with your edits" : ""}. The patient's plan is updated.` : "Rejected. The patient keeps the current plan.") : banner("badb", errText(data));
+  loadReview(); loadMyPlan();
+}
+$("rv_demo").onclick = async () => {
+  const {data} = await api("/api/demo-week", {patient_id:pid()});
+  $("rv_msg").innerHTML = data.ok ? banner("ptb", "Loaded 7 days of sessions (week ending 2026-11-22). Now make the draft.") : banner("badb", errText(data));
+  loadMyPlan();
+};
+$("rv_draft").onclick = async () => {
+  const {data} = await api("/api/adjustment/draft", {patient_id:pid()});
+  $("rv_msg").innerHTML = data.ok ? "" : banner("badb", errText(data));
+  loadReview();
+};
+$("rv_refresh").onclick = loadReview;
+
+// ---------- start ----------
+(async () => {
+  EX = (await api("/api/exercises")).data;
+  GOALS = (await api("/api/goals")).data;
+  document.querySelectorAll(".goalsel").forEach(sel => sel.innerHTML = GOALS.map(g => `<option value="${g.key}">${esc(g.label)}</option>`).join(""));
+  $("i_goal").value = "home";
+  loadIntake();
+})();
+</script>
+</body>
+</html>
