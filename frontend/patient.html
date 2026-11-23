@@ -1311,8 +1311,8 @@ V.todayPlan=()=>{const light=S.mode!=='full';S.exIdx=0;
  <div class="foot"><span></span><button class="main" data-go="setup">Set up the camera</button></div></div>`;};
 V.setup=()=>`<div class="cam fit${S.flip?' flip':''}"><img src="img/setup-wide.jpg" alt="Camera preview of Walter standing in his living room" style="object-position:50% 50%"><div class="frame${S.inFrame?' ok':''}"></div>
  <button class="ov camback" data-go="todayPlan">${I.back}Back</button>
- <div class="status ${S.inFrame?'ok':'wait'}">${S.inFrame?I.check+'You\'re in the frame':'Step back so we can see your whole leg'}</div>
- <div class="setuppanel"><p class="spt">Place the tablet at hip height, 2 steps away.</p>
+ <div class="status ${S.inFrame?'ok':'wait'}">${S.inFrame?I.check+'You\'re in the right spot':esc(S.posHint||'Step back so we can see your whole leg')}</div>
+ <div class="setuppanel"><p class="spt">${esc((window.CAM&&CAM.setupTip(PLAN[S.exIdx]))||'Place the tablet at hip height, 2 steps away.')}</p>
   <button class="main" style="min-width:0;width:100%" data-startex ${S.inFrame?'':'disabled'}>Start</button></div>
  <div style="position:absolute;left:24px;bottom:24px;display:flex;gap:12px"><button class="ov ctile" style="position:static" data-flip>${I.flip}Flip</button><button class="ov ctile" style="position:static" data-vtoggle aria-label="Voice guide ${S.voice?'on':'off'}">${S.voice?I.von:I.voff}${S.voice?'Voice on':'Voice off'}</button></div></div>`;
 function exStep(){return `<div class="exstep"><b>Exercise ${S.exIdx+1} of ${PLAN.length}</b><span class="exdots">${PLAN.map((x,i)=>`<i class="${i<S.exIdx?'d':i===S.exIdx?'n':''}"></i>`).join('')}</span></div>`;}

@@ -21,6 +21,7 @@ import { PoseSmoother } from "./detection/smooth.js";
 import { EXERCISES } from "./detection/exercises.js";
 import { scoreRep5, FIX_TEXT } from "./detection/score.js";
 import { guideFor, guidePose, repSpeech } from "./detection/guide.js";
+import { checkPosition, setupTip, targetZone } from "./detection/position.js";
 import { TO_TRACKER, trackerId, errorName, toApiResult } from "./detection/corehab-map.js";
 
 const WASM = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.2.3/wasm";
@@ -42,6 +43,8 @@ const CAM = {
   // live guide + feedback
   hud: document.createElement("canvas"), guide: null, result: null, rctx: null, gp: null, mem: {},
   repLive: null, flash: null, cue: null,
+  // where to stand / lie
+  pos: null, posIds: [], posBadSince: null, posShown: null, posSince: 0, posSaidAt: -1e9, posPrepId: null,
 };
 window.CAM = CAM;
 CAM.video.playsInline = true; CAM.video.muted = true;
@@ -52,6 +55,7 @@ const g = CAM.canvas.getContext("2d");
 const style = document.createElement("style");
 style.textContent = `.cam>canvas.cr-live{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;zoom:1}
 .cam.flip>canvas.cr-live{transform:scaleX(-1)}
+.cam.cr-on .frame{display:none}
 .cam>canvas.cr-hud{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;zoom:1}`;
 document.head.appendChild(style);
 
@@ -103,14 +107,24 @@ CAM.afterRender = function () {
   if (scr === "setup" || scr === "exercise") {
     const img = document.querySelector(".cam>img");
     if (img && live()) { img.replaceWith(CAM.canvas); }
-    if (scr === "exercise" && live() && CAM.canvas.isConnected && CAM.hud.previousSibling !== CAM.canvas) CAM.canvas.after(CAM.hud);
+    if (live() && CAM.canvas.isConnected && CAM.hud.previousSibling !== CAM.canvas) CAM.canvas.after(CAM.hud);
+    document.querySelector(".cam")?.classList.toggle("cr-on", live());
+    if (scr === "setup") prep(a.PLAN?.[a.S.exIdx]);
   }
 };
 
-CAM.startExercise = function (e) {
-  CAM.exId = e.id;
+// Which exercise the camera is set up for (setup screen: the next one; exercise screen: this one).
+function prep(e) {
+  if (!e || CAM.posPrepId === e.id) return;
+  CAM.posPrepId = e.id; CAM.exId = e.id;
   CAM.ex = EXERCISES[trackerId(e.id)] ?? null;
   CAM.view = CAM.ex?.views.side ? "side" : "front";
+  Object.assign(CAM, { pos: null, posIds: [], posBadSince: null, posShown: null });
+}
+CAM.setupTip = (e) => (e ? setupTip(trackerId(e.id), EXERCISES[trackerId(e.id)]?.views.side ? "side" : "front") : null);
+
+CAM.startExercise = function (e) {
+  CAM.posPrepId = null; prep(e);
   CAM.op = window.CR?.home?.side ?? window.CR?.side ?? "right";
   CAM.frames = []; CAM.counted = 0; CAM.scores = []; CAM.errors = {}; CAM.leg = null; CAM.lastRepEnd = undefined;
   CAM.smoother.reset?.(); setRotation(0);
@@ -174,7 +188,7 @@ function detect(ts) {
 function draw(f) {
   const W = CAM.canvas.width, H = CAM.canvas.height;
   g.drawImage(CAM.video, 0, 0, W, H);
-  if (!f) return;
+  if (!f) { drawZone(Math.max(1, W / 1280)); return; }
   const leg = CAM.leg ?? CAM.op, other = leg === "left" ? "right" : "left", s = W / 1280;
   const seg = (a, b, side, col, w) => {
     const p = f[a][side], q = f[b][side];
@@ -189,6 +203,7 @@ function draw(f) {
     g.fillStyle = "#3CDC78"; g.beginPath(); g.arc(p[0], p[1], 9 * Math.max(1, s), 0, 7); g.fill();
   }
   drawGhost(Math.max(1, s));
+  drawZone(Math.max(1, s));
 }
 
 function loop() {
@@ -212,14 +227,25 @@ function onFrame(f, t) {
   const S = a.S;
   if ((!S.voice || S.paused || S.screen !== "exercise") && window.speechSynthesis?.speaking && performance.now() / 1000 - VOICE.lastAt > 0.3
       && !(S.screen === "after" && performance.now() / 1000 - VOICE.lastAt < 4)) window.speechSynthesis.cancel();
-  // Setup: "You're in the frame" once a whole leg (hip, knee, ankle) is seen for about a second.
+  // Setup: where to be for this exercise (position.js). "You're in the frame" and Start once the
+  // patient has been in the right spot for about a second.
   if (S.screen === "setup") {
-    const seen = f && ["left", "right"].some((s) => ["hip", "knee", "ankle"].every((j) => vis(f[j][s])));
-    CAM.inFrameRun = seen ? CAM.inFrameRun + 1 : 0;
+    if (f) { CAM.posRecent = [...(CAM.posRecent ?? []), f].slice(-30); }
+    const W = CAM.video.videoWidth, H = CAM.video.videoHeight;
+    const pos = CAM.ex ? checkPosition(trackerId(CAM.exId), CAM.view, f, W, H, CAM.posRecent ?? [], "setup") : null;
+    const ok = pos ? pos.ok : !!(f && ["left", "right"].some((s) => ["hip", "knee", "ankle"].every((j) => vis(f[j][s]))));
+    CAM.pos = pos;
+    CAM.inFrameRun = ok ? CAM.inFrameRun + 1 : 0;
     const inFrame = CAM.inFrameRun >= 20;
-    if (inFrame !== !!S.inFrame) { S.inFrame = inFrame; a.render(); }
+    const hint = stableHint(pos, t);
+    if (inFrame !== !!S.inFrame || (hint && hint !== S.posHint)) {
+      if (inFrame && !S.inFrame) say("Good, you're in the right spot. Tap Start.", { urgent: true });
+      S.inFrame = inFrame; if (hint) S.posHint = hint; a.render();
+    }
+    if (!inFrame && hint && t - CAM.posSince > 1.5 && t - CAM.posSaidAt > 5) { CAM.posSaidAt = t; say(hint, { urgent: true }); }
     return;
   }
+  if (S.screen === "exercise" && CAM.ex) exercisePosition(f, t, S);
   if (S.screen !== "exercise" || !CAM.ex || !f) return;
   CAM.frames.push(f);
   while (CAM.frames.length && CAM.frames[0].t < t - WINDOW_S) CAM.frames.shift();
@@ -246,6 +272,51 @@ function onFrame(f, t) {
     CAM.flash = { n: CAM.scores.length, score: sc.score, tip: tipFor(reasons), until: t + 3 };
     say(repSpeech(CAM.scores.length, sc.score, reasons, FIX_TEXT), { urgent: true });
   }
+}
+
+// ---------- where to be ----------
+// The instruction shown is the most common one over the last half second, so it doesn't flicker.
+function stableHint(pos, t) {
+  if (!pos) return null;
+  CAM.posIds.push(pos.ok ? "" : pos.text);
+  if (CAM.posIds.length > 15) CAM.posIds.shift();
+  const c = {}; for (const x of CAM.posIds) c[x] = (c[x] || 0) + 1;
+  const top = Object.entries(c).sort((a, b) => b[1] - a[1])[0][0];
+  if (top !== CAM.posShown) { CAM.posShown = top; CAM.posSince = t; }
+  return top || null;
+}
+// While exercising: only what breaks tracking, after it has lasted a second; said between reps
+// (or mid-rep once it has lasted 3 s).
+function exercisePosition(f, t, S) {
+  if (S.paused || S.ending || S.resting) { CAM.posBadSince = null; CAM.posIssue = null; return; }
+  const W = CAM.video.videoWidth, H = CAM.video.videoHeight;
+  const pos = checkPosition(trackerId(CAM.exId), CAM.view, f, W, H, [], "exercise");
+  CAM.pos = pos;
+  if (pos.ok) { CAM.posBadSince = null; CAM.posIssue = null; return; }
+  CAM.posBadSince ??= t;
+  if (t - CAM.posBadSince < 1) return;
+  CAM.posIssue = pos;
+  if ((!CAM.repLive || t - CAM.posBadSince > 3) && t - CAM.posSaidAt > 6) { CAM.posSaidAt = t; say(pos.text, { urgent: true }); }
+}
+
+// Target zone and arrow on the video (flips with it, so the arrow points the right way on screen).
+function drawZone(s) {
+  const S = app()?.S, scr = S?.screen;
+  const show = scr === "setup" || (scr === "exercise" && CAM.posIssue);
+  if (!show || !CAM.ex) return;
+  const z = targetZone(trackerId(CAM.exId), CAM.view); if (!z) return;
+  const W = CAM.canvas.width, H = CAM.canvas.height, ok = scr === "setup" ? !!S.inFrame : false;
+  g.save();
+  g.strokeStyle = ok ? GREEN : "rgba(255,255,255,.85)"; g.lineWidth = 5 * s; g.setLineDash(ok ? [] : [18 * s, 14 * s]);
+  rr(g, z.x0 * W, z.y0 * H, (z.x1 - z.x0) * W, (z.y1 - z.y0) * H, 28 * s); g.stroke();
+  const pos = scr === "setup" ? CAM.pos : CAM.posIssue;
+  if (pos?.dir && pos.box) {
+    const cx = ((pos.box.x0 + pos.box.x1) / 2) * W, cy = ((pos.box.y0 + pos.box.y1) / 2) * H, L = 150 * s, d = pos.dir[0];
+    g.setLineDash([]); g.strokeStyle = AMBER; g.fillStyle = AMBER; g.lineWidth = 12 * s;
+    g.beginPath(); g.moveTo(cx, cy); g.lineTo(cx + d * L, cy); g.stroke();
+    g.beginPath(); g.moveTo(cx + d * (L + 34 * s), cy); g.lineTo(cx + d * L, cy - 28 * s); g.lineTo(cx + d * L, cy + 28 * s); g.fill();
+  }
+  g.restore();
 }
 
 // ---------- live guide, voice and on-screen score ----------
@@ -342,12 +413,12 @@ function stars(c, x, y, n, size) {
 // Gauge, rep scores and the score after each rep. Not mirrored, so text stays readable.
 function drawHud(t) {
   const h = CAM.hud, S = app()?.S;
-  if (!h.isConnected || S?.screen !== "exercise") return;
+  if (!h.isConnected) return;
   const dpr = window.devicePixelRatio || 1, W = h.clientWidth, H = h.clientHeight;
   if (h.width !== Math.round(W * dpr) || h.height !== Math.round(H * dpr)) { h.width = Math.round(W * dpr); h.height = Math.round(H * dpr); }
   const c = h.getContext("2d");
   c.setTransform(dpr, 0, 0, dpr, 0, 0); c.clearRect(0, 0, W, H);
-  if (S.paused || S.resting || S.ending) return;
+  if (S?.screen !== "exercise" || S.paused || S.resting || S.ending) return;
   const font = (px, w = 600) => `${w} ${px}px system-ui, -apple-system, "Segoe UI", sans-serif`;
   const gp = CAM.gp, G = CAM.guide;
 
@@ -389,6 +460,12 @@ function drawHud(t) {
     c.textAlign = "left";
   }
 
+  // centre: where to move, when the patient has drifted out of position
+  if (CAM.posIssue) {
+    c.font = font(30, 700); const tw = c.measureText(CAM.posIssue.text).width, bw = tw + 64, bx = (W - bw) / 2, by = H * 0.36;
+    c.fillStyle = "rgba(255,190,60,.95)"; rr(c, bx, by, bw, 70, 35); c.fill();
+    c.fillStyle = "#0E1116"; c.fillText(CAM.posIssue.text, bx + 32, by + 46);
+  }
   // top centre: the score of the rep just finished
   const fl = CAM.flash;
   if (fl && t < fl.until) {

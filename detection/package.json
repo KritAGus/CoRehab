@@ -3,5 +3,5 @@
   "private": true,
   "type": "module",
   "description": "CoRehab detection: rep counting, form checks and 1-5 scoring (code in frontend/detection/).",
-  "scripts": { "test": "node --test tests/exercises.test.mjs tests/steady.test.mjs tests/score.test.mjs tests/corehab.test.mjs tests/guide.test.mjs" }
+  "scripts": { "test": "node --test tests/exercises.test.mjs tests/steady.test.mjs tests/score.test.mjs tests/corehab.test.mjs tests/guide.test.mjs tests/position.test.mjs" }
 }
