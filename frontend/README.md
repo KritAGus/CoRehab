@@ -11,4 +11,6 @@ connect the pages to the API (see `docs/API.md`); opened as plain files, the pag
 No API keys or plan rules in the front end.
 
 `detection-live.js` turns on the tablet camera on the setup and exercise screens: it counts reps, checks form and
-scores each rep (code in `frontend/detection/`, see `detection/README.md`). Add `?camera=0` to use the demo timer.
+scores each rep (code in `frontend/detection/`, see `detection/README.md`). On the exercise screen it shows a
+live guide to the PT's target, a gauge, each rep's 1-5 score, and speaks the score and fixes when Voice guide is on.
+Add `?camera=0` to use the demo timer.

@@ -8,15 +8,19 @@
      CAM.counting()           true while the camera (not the demo timer) counts reps
      CAM.resultFor(id, reps)  { form_scores, error_counts } for POST /api/result
    The camera calls CRAPP.camRep(fixText) once per finished rep.
+   On the exercise screen it also shows a live guide (dashed cyan: where to move to, from the
+   PT-approved reference), a gauge with the live angle against the target, each rep's 1-5 score,
+   and, when the app's voice guide is on, says the score and what to fix.
    No camera, a refused permission or ?camera=0: the prototype's demo timer runs as before.
    Video is never stored or sent: only the counts and scores leave the tablet. */
 import { FilesetResolver, PoseLandmarker } from
   "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.2.3/vision_bundle.mjs";
 import { toFrame, facingOf, vis, rotationForHead, unrotateLandmarks, drawRotated } from "./detection/geometry.js";
-import { analyze } from "./detection/engine.js";
+import { analyze, liveCue } from "./detection/engine.js";
 import { PoseSmoother } from "./detection/smooth.js";
 import { EXERCISES } from "./detection/exercises.js";
 import { scoreRep5, FIX_TEXT } from "./detection/score.js";
+import { guideFor, guidePose, repSpeech } from "./detection/guide.js";
 import { TO_TRACKER, trackerId, errorName, toApiResult } from "./detection/corehab-map.js";
 
 const WASM = "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.2.3/wasm";
@@ -35,15 +39,20 @@ const CAM = {
   counted: 0, scores: [], errors: {}, perEx: {}, lastTs: 0, t0: performance.now(), frameNo: 0, leg: null,
   rotation: 0, rotCanvas: null, noPoseSince: null, poseRun: 0, headVotes: 0, lyingRun: 0, flipRun: 0, uprightRun: 0,
   inFrameRun: 0, lastFrame: null,
+  // live guide + feedback
+  hud: document.createElement("canvas"), guide: null, result: null, rctx: null, gp: null, mem: {},
+  repLive: null, flash: null, cue: null,
 };
 window.CAM = CAM;
 CAM.video.playsInline = true; CAM.video.muted = true;
 CAM.canvas.className = "cr-live";
+CAM.hud.className = "cr-hud";
 const g = CAM.canvas.getContext("2d");
 
 const style = document.createElement("style");
 style.textContent = `.cam>canvas.cr-live{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;zoom:1}
-.cam.flip>canvas.cr-live{transform:scaleX(-1)}`;
+.cam.flip>canvas.cr-live{transform:scaleX(-1)}
+.cam>canvas.cr-hud{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;zoom:1}`;
 document.head.appendChild(style);
 
 const app = () => window.CRAPP;
@@ -94,6 +103,7 @@ CAM.afterRender = function () {
   if (scr === "setup" || scr === "exercise") {
     const img = document.querySelector(".cam>img");
     if (img && live()) { img.replaceWith(CAM.canvas); }
+    if (scr === "exercise" && live() && CAM.canvas.isConnected && CAM.hud.previousSibling !== CAM.canvas) CAM.canvas.after(CAM.hud);
   }
 };
 
@@ -104,6 +114,8 @@ CAM.startExercise = function (e) {
   CAM.op = window.CR?.home?.side ?? window.CR?.side ?? "right";
   CAM.frames = []; CAM.counted = 0; CAM.scores = []; CAM.errors = {}; CAM.leg = null; CAM.lastRepEnd = undefined;
   CAM.smoother.reset?.(); setRotation(0);
+  CAM.guide = CAM.ex ? guideFor(trackerId(e.id), CAM.view) : null;
+  Object.assign(CAM, { result: null, rctx: null, gp: null, mem: {}, repLive: null, flash: null, cue: null });
 };
 
 function ctx(facing = 1) {
@@ -176,6 +188,7 @@ function draw(f) {
     const p = f[j][leg]; if (!vis(p)) continue;
     g.fillStyle = "#3CDC78"; g.beginPath(); g.arc(p[0], p[1], 9 * Math.max(1, s), 0, 7); g.fill();
   }
+  drawGhost(Math.max(1, s));
 }
 
 function loop() {
@@ -187,8 +200,9 @@ function loop() {
     const now = performance.now(), t = (now - CAM.t0) / 1000;
     const lm = detect(nextTs(now));
     const f = lm ? toFrame(CAM.smoother.update(lm, t, v.videoWidth, v.videoHeight), v.videoWidth, v.videoHeight, t) : null;
-    draw(f);
     onFrame(f, t);
+    draw(f);
+    drawHud(t);
   }
   requestAnimationFrame(loop);
 }
@@ -196,6 +210,8 @@ function loop() {
 function onFrame(f, t) {
   const a = app(); if (!a) return;
   const S = a.S;
+  if ((!S.voice || S.paused || S.screen !== "exercise") && window.speechSynthesis?.speaking && performance.now() / 1000 - VOICE.lastAt > 0.3
+      && !(S.screen === "after" && performance.now() / 1000 - VOICE.lastAt < 4)) window.speechSynthesis.cancel();
   // Setup: "You're in the frame" once a whole leg (hip, knee, ankle) is seen for about a second.
   if (S.screen === "setup") {
     const seen = f && ["left", "right"].some((s) => ["hip", "knee", "ankle"].every((j) => vis(f[j][s])));
@@ -207,10 +223,12 @@ function onFrame(f, t) {
   if (S.screen !== "exercise" || !CAM.ex || !f) return;
   CAM.frames.push(f);
   while (CAM.frames.length && CAM.frames[0].t < t - WINDOW_S) CAM.frames.shift();
+  liveGuide(f, t, S);
   if (++CAM.frameNo % 5 || CAM.frames.length < 10) return;
   const facing = CAM.view === "side" ? (CAM.frames.slice(-60).map(facingOf).reduce((x, y) => x + y, 0) >= 0 ? 1 : -1) : 1;
   const r = analyze(CAM.frames, CAM.ex, ctx(facing), {});
   CAM.leg = r.leg ?? CAM.leg;
+  CAM.result = r; CAM.rctx = { ...ctx(facing), leg: CAM.leg ?? CAM.op };
   // Count only reps that finished after the last one we counted; while paused or resting, skip them.
   const reps = r.reps.filter((x) => x.t_end > (CAM.lastRepEnd ?? -Infinity));
   if (!reps.length) return;
@@ -221,10 +239,196 @@ function onFrame(f, t) {
     CAM.scores.push(sc.score);
     for (const e of rep.errors) { const k = errorName(e.id); CAM.errors[k] = (CAM.errors[k] || 0) + 1; }
     const fix = rep.errors.length ? (FIX_TEXT[rep.errors[0].id] ?? rep.errors[0].label) + "." : "";
-    CAM.perEx[CAM.exId] = { scores: CAM.scores.slice(), errors: { ...CAM.errors } };
+    const reasons = [...new Set([...rep.errors.map((e) => e.id), ...sc.reasons])];
+    CAM.perEx[CAM.exId] = { scores: CAM.scores.slice(), errors: { ...CAM.errors },
+      reasons: [...(CAM.perEx[CAM.exId]?.reasons ?? []), ...reasons] };
     if (!a.camRep || !a.camRep(fix)) break;
+    CAM.flash = { n: CAM.scores.length, score: sc.score, tip: tipFor(reasons), until: t + 3 };
+    say(repSpeech(CAM.scores.length, sc.score, reasons, FIX_TEXT), { urgent: true });
   }
 }
+
+// ---------- live guide, voice and on-screen score ----------
+const SAY_RATE = [0.85, 1, 1.15];             // the app's Voice guide speed: Slower / Normal / Faster
+const VOICE = { lastAt: -1e9, lastText: "", lastTextAt: -1e9 };
+function say(text, { urgent = false, gap = 1.5 } = {}) {
+  const S = app()?.S, sp = window.speechSynthesis;
+  if (!text || !S?.voice || !sp) return;
+  const now = performance.now() / 1000;
+  if (!urgent && (sp.speaking || now - VOICE.lastAt < gap)) return;
+  if (!urgent && text === VOICE.lastText && now - VOICE.lastTextAt < 6) return;   // don't nag
+  if (urgent) sp.cancel();
+  const u = new SpeechSynthesisUtterance(text);
+  u.rate = SAY_RATE[S.voiceSpeed ?? 1] ?? 1; u.lang = "en-US";
+  sp.speak(u);
+  VOICE.lastAt = now; VOICE.lastText = text; VOICE.lastTextAt = now;
+}
+CAM.say = say;
+
+const TIP = { much_less_movement: "Go a little further", less_movement: "Go a little further", much_quicker: "Slow down" };
+function tipFor(reasons) { const r = reasons[0]; return r ? FIX_TEXT[r] ?? TIP[r] ?? "" : ""; }
+
+// Per frame: where the guide is, and live spoken cues during the rep.
+//   stuck short of the target for 0.7 s -> "A little further"
+//   past the target where that's an error, or a form warning from the exercise -> say it
+//   target reached -> "Good"
+// "Slow down" comes with the rep's score (score.js: much quicker than the PT reps).
+function liveGuide(f, t, S) {
+  const r = CAM.result;
+  CAM.gp = null; CAM.cue = null;
+  if (!CAM.guide || !r || !Number.isFinite(r.base?.signal) || S.paused || S.ending || S.resting) return;
+  const gp = guidePose(CAM.guide, CAM.rctx, f, r.base, r.scale, CAM.mem);
+  CAM.gp = gp;
+  if (!gp) return;
+  CAM.cue = liveCue(CAM.ex, CAM.rctx, f, r.base);
+  const L = CAM.repLive;
+  if (gp.status === "rest") { CAM.repLive = null; return; }
+  if (!L) { CAM.repLive = { t0: t, max: gp.exc, maxAt: t, saidGood: false, saidMore: false, saidOver: false }; return; }
+  if (gp.exc > L.max + 0.02 * gp.band.p50) { L.max = gp.exc; L.maxAt = t; }
+  if ((gp.status === "good" || gp.status === "over") && !L.reached) L.reached = t;
+  if (gp.status === "over" && !L.saidOver) { L.saidOver = true; say(CAM.cue ?? "Not so far", { urgent: true }); return; }
+  if (CAM.cue && gp.status !== "over") { say(CAM.cue); return; }
+  if (gp.status === "good" && !L.saidGood && !L.saidOver) { L.saidGood = true; say("Good"); return; }
+  if (gp.status === "more" && !L.saidMore && !L.reached && gp.exc > 0.4 * gp.band.p50 && t - L.maxAt > 0.7) {
+    L.saidMore = true; say("A little further");
+  }
+}
+
+const CYAN = "#50DCFF", GREEN = "#3CDC78", AMBER = "#FFBE3C", RED = "#FF5A50";
+const statusColor = (st) => (st === "good" ? GREEN : st === "over" ? RED : st === "more" ? AMBER : "#F5F5F5");
+const scoreColor = (n) => (n >= 5 ? GREEN : n >= 3 ? AMBER : RED);
+
+// The guide on the video (flips with it): dashed cyan where to move, ring at the target.
+function drawGhost(s) {
+  const gp = CAM.gp, gh = gp?.ghost;
+  if (!gh || app()?.S.screen !== "exercise") return;
+  const ring = gp.status === "good" ? GREEN : gp.status === "over" ? RED : CYAN;
+  g.save(); g.strokeStyle = CYAN; g.lineWidth = 7 * s; g.lineCap = "round"; g.setLineDash([16 * s, 14 * s]);
+  if (gh.kind === "rot") {
+    for (const [p, q] of gh.segments) { g.beginPath(); g.moveTo(p[0], p[1]); g.lineTo(q[0], q[1]); g.stroke(); }
+    g.setLineDash([]); g.lineWidth = 5 * s; g.strokeStyle = ring;
+    g.beginPath(); g.arc(gh.end[0], gh.end[1], 22 * s, 0, 7); g.stroke();
+  } else {
+    // a target line across the body where the hips (or foot) should get to, and an arrow to it
+    const [x, y] = gh.at, half = 170 * s, horiz = gh.axis === "y";
+    g.beginPath();
+    if (horiz) { g.moveTo(x - half, y); g.lineTo(x + half, y); } else { g.moveTo(x, y - half); g.lineTo(x, y + half); }
+    g.stroke(); g.setLineDash([]);
+    const [nx, ny] = gh.now, d = Math.hypot(x - nx, y - ny);
+    if (d > 30 * s) {
+      const ux = (x - nx) / d, uy = (y - ny) / d, hx = x - ux * 16 * s, hy = y - uy * 16 * s;
+      g.strokeStyle = ring; g.lineWidth = 5 * s;
+      g.beginPath(); g.moveTo(nx, ny); g.lineTo(hx, hy); g.stroke();
+      g.fillStyle = ring; g.beginPath(); g.moveTo(x, y);
+      g.lineTo(hx - uy * 12 * s, hy + ux * 12 * s); g.lineTo(hx + uy * 12 * s, hy - ux * 12 * s); g.fill();
+    }
+  }
+  g.restore();
+}
+
+function rr(c, x, y, w, h, r) { c.beginPath(); c.roundRect ? c.roundRect(x, y, w, h, r) : c.rect(x, y, w, h); }
+function stars(c, x, y, n, size) {
+  for (let i = 0; i < 5; i++) {
+    const cx = x + i * size * 1.15 + size / 2, cy = y + size / 2;
+    c.fillStyle = i < n ? AMBER : "rgba(255,255,255,.25)"; c.beginPath();
+    for (let k = 0; k < 10; k++) {
+      const a = -Math.PI / 2 + (k * Math.PI) / 5, rad = k % 2 ? size * 0.21 : size * 0.5;
+      c.lineTo(cx + rad * Math.cos(a), cy + rad * Math.sin(a));
+    }
+    c.fill();
+  }
+}
+
+// Gauge, rep scores and the score after each rep. Not mirrored, so text stays readable.
+function drawHud(t) {
+  const h = CAM.hud, S = app()?.S;
+  if (!h.isConnected || S?.screen !== "exercise") return;
+  const dpr = window.devicePixelRatio || 1, W = h.clientWidth, H = h.clientHeight;
+  if (h.width !== Math.round(W * dpr) || h.height !== Math.round(H * dpr)) { h.width = Math.round(W * dpr); h.height = Math.round(H * dpr); }
+  const c = h.getContext("2d");
+  c.setTransform(dpr, 0, 0, dpr, 0, 0); c.clearRect(0, 0, W, H);
+  if (S.paused || S.resting || S.ending) return;
+  const font = (px, w = 600) => `${w} ${px}px system-ui, -apple-system, "Segoe UI", sans-serif`;
+  const gp = CAM.gp, G = CAM.guide;
+
+  // left: the gauge (below the exercise name, above the cue bar)
+  const x = 24, y = 150, pw = 200, ph = Math.min(380, H - y - 260);
+  if (G && ph > 200) {
+    c.fillStyle = "rgba(14,17,22,.72)"; rr(c, x, y, pw, ph, 20); c.fill();
+    c.fillStyle = "#C8CDD4"; c.font = font(18); c.fillText(G.sig.label, x + 18, y + 32);
+    const deg = (G.sig.unit ?? "°") === "°";
+    const val = !gp ? "--" : deg ? `${Math.round(Math.abs(gp.value))}°` : `${Math.max(0, Math.round((100 * gp.exc) / gp.band.p50))}%`;
+    c.fillStyle = gp ? statusColor(gp.status) : "#F5F5F5"; c.font = font(48, 700); c.fillText(val, x + 18, y + 84);
+    if (gp) {
+      c.fillStyle = CYAN; c.font = font(20);
+      c.fillText(deg ? `Aim ${Math.round(Math.abs(gp.target))}°` : "Aim 100%", x + 18, y + 114);
+    }
+    // bar: 0 at the bottom, PT range in green, target tick in cyan, you = white marker
+    const bx = x + pw - 46, by = y + 24, bw = 22, bh = ph - 100;
+    const m = G.ref.movement, top = Math.max(m.p90 * 1.5, (gp?.exc ?? 0) * 1.05), Y = (v) => by + bh - (bh * Math.max(0, Math.min(v, top))) / top;
+    c.fillStyle = "rgba(255,255,255,.18)"; rr(c, bx, by, bw, bh, 11); c.fill();
+    const hiEdge = gp && Number.isFinite(gp.over) ? gp.over : m.p90 * 1.15;
+    c.fillStyle = "rgba(60,220,120,.55)"; rr(c, bx, Y(hiEdge), bw, Y(m.p10 - 0.1 * m.p50) - Y(hiEdge), 6); c.fill();
+    c.strokeStyle = CYAN; c.lineWidth = 4; c.beginPath(); c.moveTo(bx - 8, Y(m.p50)); c.lineTo(bx + bw + 8, Y(m.p50)); c.stroke();
+    if (gp) {
+      const my = Y(Math.max(0, gp.exc));
+      c.fillStyle = statusColor(gp.status); c.beginPath(); c.moveTo(bx - 4, my); c.lineTo(bx - 20, my - 10); c.lineTo(bx - 20, my + 10); c.fill();
+      c.fillRect(bx - 2, my - 3, bw + 4, 6);
+    }
+    const word = !gp ? "Getting ready" : CAM.cue ?? { rest: "Ready", more: "Keep going", good: "Good", over: "Too far" }[gp.status];
+    c.fillStyle = gp ? statusColor(CAM.cue ? "over" : gp.status) : "#C8CDD4"; c.font = font(19);
+    wrap(c, word, x + 18, y + 148, pw - 80, 24, 3);
+    // rep scores so far
+    const sc = CAM.scores, cs = 30, per = 5;
+    c.font = font(17, 700); c.textAlign = "center";
+    sc.slice(-15).forEach((v, i) => {
+      const cx = x + 18 + (i % per) * (cs + 4), cy = y + ph - 22 - (Math.ceil(Math.min(sc.length, 15) / per) - 1 - Math.floor(i / per)) * (cs + 4) - cs;
+      c.fillStyle = scoreColor(v); rr(c, cx, cy, cs, cs, 7); c.fill();
+      c.fillStyle = "#0E1116"; c.fillText(String(v), cx + cs / 2, cy + cs / 2 + 6);
+    });
+    c.textAlign = "left";
+  }
+
+  // top centre: the score of the rep just finished
+  const fl = CAM.flash;
+  if (fl && t < fl.until) {
+    const fw = 360, fh = fl.tip ? 112 : 84, fx = (W - fw) / 2, fy = 24;
+    c.fillStyle = "rgba(14,17,22,.85)"; rr(c, fx, fy, fw, fh, 20); c.fill();
+    c.fillStyle = scoreColor(fl.score); c.font = font(30, 700); c.fillText(`Rep ${fl.n}: ${fl.score}/5`, fx + 22, fy + 50);
+    stars(c, fx + fw - 22 - 5 * 26 * 1.15, fy + 28, fl.score, 26);
+    if (fl.tip) { c.fillStyle = "#F5F5F5"; c.font = font(20); c.fillText(fl.tip, fx + 22, fy + 90); }
+  }
+}
+function wrap(c, text, x, y, w, lh, max) {
+  const words = String(text).split(" "); let line = "", n = 0;
+  for (const wd of words) {
+    const test = line ? line + " " + wd : wd;
+    if (c.measureText(test).width > w && line) { c.fillText(line, x, y + n * lh); line = wd; if (++n >= max) return; }
+    else line = test;
+  }
+  if (line) c.fillText(line, x, y + n * lh);
+}
+
+// "After each exercise" screen: the form score for that exercise.
+CAM.summaryHtml = function (exerciseId) {
+  const d = CAM.perEx[exerciseId];
+  if (!d?.scores.length) return "";
+  const avg = d.scores.reduce((a, b) => a + b, 0) / d.scores.length, st = Math.min(5, Math.max(1, Math.floor(avg + 0.25)));
+  const counts = {}; for (const r of d.reasons ?? []) counts[r] = (counts[r] || 0) + 1;
+  const main = Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0];
+  const tip = main ? tipFor([main]) : "Nice form. Keep it up!";
+  const star = (on) => `<svg viewBox="0 0 24 24" width="34" height="34" aria-hidden="true"><path d="M12 2.5l2.9 6.1 6.6.8-4.9 4.6 1.3 6.6L12 17.3l-5.9 3.3 1.3-6.6-4.9-4.6 6.6-.8z" fill="${on ? "#F5A524" : "#D5D9DF"}"/></svg>`;
+  return `<div class="card crscore" role="status" aria-label="Form score ${avg.toFixed(1)} out of 5">
+   <div class="crs-top"><span class="crs-stars">${[0, 1, 2, 3, 4].map((i) => star(i < st)).join("")}</span><b>${avg.toFixed(1)}<small> / 5</small></b></div>
+   <div class="crs-reps">${d.scores.map((v) => `<i class="s${v >= 5 ? 5 : v >= 3 ? 3 : 1}">${v}</i>`).join("")}</div>
+   <p>${tip}</p></div>`;
+};
+style.textContent += `.crscore{margin-top:20px;padding:22px 26px;display:flex;flex-direction:column;gap:12px}
+.crs-top{display:flex;align-items:center;gap:18px}.crs-top b{font-size:40px;font-weight:700}.crs-top small{font-size:22px;color:var(--ink-muted)}
+.crs-stars{display:flex;gap:2px}.crs-reps{display:flex;flex-wrap:wrap;gap:6px}
+.crs-reps i{font-style:normal;width:38px;height:38px;border-radius:9px;display:grid;place-items:center;font-weight:700;font-size:18px;color:#0E1116}
+.crs-reps .s5{background:#3CDC78}.crs-reps .s3{background:#FFBE3C}.crs-reps .s1{background:#FF8A80}
+.crscore p{margin:0;font-size:21px;font-weight:600}`;
 
 // ---------- results for POST /api/result ----------
 // form_scores: one value 0-1 per rep (1-5 score mapped: 5 -> 1.0, 3 -> 0.5, 1 -> 0.0).

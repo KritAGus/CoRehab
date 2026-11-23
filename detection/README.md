@@ -8,7 +8,8 @@ Video is never stored or sent; only the numbers leave the tablet.
 
 | File | What it does |
 |---|---|
-| `frontend/detection-live.js` | Runs on the patient tablet: camera, MediaPipe Pose (Full model), skeleton overlay, live rep counting, per-rep score, result for the API |
+| `frontend/detection-live.js` | Runs on the patient tablet: camera, MediaPipe Pose (Full model), skeleton overlay, live guide, live rep counting, per-rep score on screen and spoken, result for the API |
+| `frontend/detection/guide.js` | Live guide: the target pose from the PT reference, the gauge status, the spoken rep feedback |
 | `frontend/detection/engine.js` | Rep counting (signal per exercise, start/end thresholds, leg choice on side views) and error checks |
 | `frontend/detection/exercises.js` | The 10 exercises: joints tracked, rep signal, error checks and their limits (`T`) |
 | `frontend/detection/score.js` | 1-5 score per rep and per session (`scoreRep5`, `scoreSession5`) |
@@ -29,8 +30,31 @@ The code lives under `frontend/` because the backend serves only that folder. It
 - Each finished rep -> `CRAPP.camRep(fix)`: same as one timer tick, plus the camera's correction for that rep
   (e.g. "Stand up tall."), shown in the cue bar. Pause, rest and the "End" sheet are respected.
 - `patient-live.js` `postResult()` adds `CAM.resultFor(exercise_id, reps)` to the body.
+- "After each exercise" screen -> `CAM.summaryHtml(id)`: stars, average 1-5 score, each rep's score and the main tip.
 
 Turn the camera off with `?camera=0`. Opened as a file (no server), the camera is off too.
+
+## Live guide and voice (exercise screen)
+
+What the patient sees and hears while exercising:
+
+- **Guide (dashed cyan)**, drawn on the video: where to move to. The target is the PT reps' median movement
+  (`reference.js` `movement.p50`) added to the patient's own resting position, so it fits their body and setup.
+  The guide pose is found by moving the patient's live joints until the exercise's own metric reads the target,
+  so the guide always agrees with how reps are counted and scored:
+  knee bends turn the shank around the knee; leg raise and abduction turn the whole leg around the hip; bridge
+  turns the thigh around the knee; squat and sit-to-stand turn the thigh over the shank; heel slide keeps hip and
+  heel on the floor and lifts the knee; height exercises (sit-to-stand front, squat front, step-up, bridge front)
+  show a target line with an arrow. The ring at the end turns green at the target, red past it.
+  Angle guides appear once the patient starts moving (until then either side of the leg fits the angle).
+- **Gauge** (left): live angle (or % of the way for heights) against "Aim", the PT range in green, the target as a
+  cyan tick, and a word: Ready / Keep going / Good / Too far, or the exercise's live form warning.
+  "Too far" only exists where it is an error (leg raise, abduction, squat, bridge).
+- **Rep scores**: after each rep, "Rep 3: 4/5" with stars at the top for 3 s, and a coloured chip per rep in the gauge.
+- **Voice** (the app's Voice guide switch and speed): "Good" at the target, "A little further" when stuck short of it,
+  the exercise's form warning when it appears ("Stand tall", "Lower: lift only a little"), and after each rep
+  "Rep 3. 4 out of 5." plus the main fix ("Stand up tall.", "Slow down.", "Go a little further.").
+  Uses the browser's speech (`speechSynthesis`); nothing is recorded or sent.
 
 ## Mapping onto the CoRehab API (`corehab-map.js`)
 
@@ -78,7 +102,7 @@ tuned on, so the next session with new people is the real test.
 ## Tests
 
 ```
-cd detection && npm test     # 112 tests: exercises on synthetic poses, smoothing, scoring, API mapping
+cd detection && npm test     # 127 tests: exercises on synthetic poses, smoothing, scoring, API mapping, live guide
 ```
 
 ## Known limits
@@ -89,3 +113,6 @@ cd detection && npm test     # 112 tests: exercises on synthetic poses, smoothin
 - The tracked leg on side views is the one that moves; the patient's operated side is used for front views
   (from the server when available, otherwise right).
 - Not a clinical score: limits and weights need PT sign-off before use with patients.
+- The guide target is one number per exercise (the PT reps' median). A PT may want a per-patient target as
+  range of motion improves; `guidePose` takes it from `reference.js` today.
+- Lying exercises: the cue bar and buttons cover the bottom of the camera view, where the legs usually are.
