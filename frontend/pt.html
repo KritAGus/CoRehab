@@ -160,6 +160,7 @@ h1{margin:0;font-size:30px;line-height:36px;font-weight:700;letter-spacing:-0.02
 </div>
 <div class="stagewrap" id="stage"><div class="device" id="device"></div></div>
 
+<script src="pt-live.js"></script>
 <script>
 (function(){
 const dev=document.getElementById('device');
@@ -492,7 +493,7 @@ function schedView(){const H0=8,H1=17;const MON=['Jan','Feb','Mar','Apr','May','
  <div class="clist">${calls.filter(c=>!c.done).map(c=>`<div class="crow"><div class="cmain"><b>${c.who}</b><span>${c.why}</span></div><span class="cdue${c.dueK==='urg'?' now':''}">${c.due}</span><div class="cact"><span class="cph">${I.phone}${c.ph}</span><button class="btn sec" data-logc="${c.id}">Log call</button></div></div>`).join('')||'<p class="sub" style="margin-top:8px">All calls made.</p>'}</div></div>
  <div class="card pad hcard"><div class="selhd"><h2>Call history</h2></div>
  <div class="hlist">${hist.map(h=>`<div class="hrow"><span class="hchk">${I.check}</span><div><div class="hrt"><b>${h.who}</b><span>${h.d}</span></div><p>${h.n}</p></div></div>`).join('')}</div></div></div></div>`;}
-function render(){const v={list:listView,intake:intakeView,visit:visitView,plan:planView,sent:sentView,wlist:wlistView,alert:alertView,review:reviewView,wplan:planView,wsent:wsentView,kept:keptView,wvisit:wvisitView,prof:profView,dis:disView,msg:msgView,sched:schedView}[S.view]();
+function render(){const v=((window.PTL&&PTL.live&&PTL.views[S.view])||{list:listView,intake:intakeView,visit:visitView,plan:planView,sent:sentView,wlist:wlistView,alert:alertView,review:reviewView,wplan:planView,wsent:wsentView,kept:keptView,wvisit:wvisitView,prof:profView,dis:disView,msg:msgView,sched:schedView}[S.view])(); /* CoRehab: live screens from pt-live.js */
  const sc=dev.querySelector('.main');const top=S._keep&&sc?sc.scrollTop:0;S._keep=false;
  dev.innerHTML=side()+`<main class="main">${v}</main>`;const m=dev.querySelector('.main');m.scrollTop=top;
  document.getElementById('jump').value=S.view;
@@ -561,7 +562,8 @@ dev.addEventListener('keydown',ev=>{if(ev.key==='Enter'&&ev.target.matches('tr[d
 document.getElementById('jump').addEventListener('change',e=>{const v=e.target.value;if(v==='wvisit'){S.visitFor='Walter Miller';S.visitDone=false;}if(v==='dis')S.disDone=false;S.view=v;render();});
 document.getElementById('restart').addEventListener('click',()=>{S=fresh();render();});
 function fit(){const st=document.getElementById('stage');const k=Math.min(st.clientWidth/1480,st.clientHeight/940,1);dev.style.transform=`translate(-50%,-50%) scale(${k})`;}
-window.addEventListener('resize',fit);render();fit();
+window.PTAPP={get S(){return S},LIB,lib,I,render}; /* CoRehab hooks */
+window.addEventListener('resize',fit);render();fit();if(window.PTL)PTL.init();
 })();
 </script>
 

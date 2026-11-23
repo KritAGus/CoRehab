@@ -756,6 +756,7 @@ h2{margin:0;font-size:28px;line-height:36px;font-weight:600;letter-spacing:-0.01
 </div>
 <div class="stagewrap" id="stagewrap"><div class="device" id="device"></div></div>
 
+<script src="patient-live.js"></script>
 <script>
 (function(){
 const dev=document.getElementById('device');
@@ -803,7 +804,7 @@ const STS={id:'sit_to_stand',name:'Sit-to-stand',sets:3,reps:8,img:'img/ex-sit-t
   cue:'Lean forward, then stand up tall.',fix:'Push through both feet evenly.',
   steps:['Sit near the front of a sturdy chair, feet flat and hip-width apart.','Cross your arms, lean forward a little, and stand up slowly.','Sit back down slowly, with control.'],
   tip:'Keep your weight even on both legs.',lines:[[867,267],[707,493],[893,613],[853,827]]};
-function newPlan(){return [PLAN[0],PLAN[1],STS,Object.assign({},PLAN[3],{reps:12})];}
+function newPlan(){if(window.CR&&CR.live)return PLAN.slice();return [PLAN[0],PLAN[1],STS,Object.assign({},PLAN[3],{reps:12})];}
 const CHANGES=[{k:'same',l:'Same'},{k:'same',l:'Same'},{k:'new',l:'New',was:'Seated knee extensions',why:'Your knee bends well now. Sit-to-stands build the strength for getting up from a chair.'},{k:'up',l:'2 more reps',was:'3 sets of 10',why:'Your form has been steady and your pain is low, so you\'re ready for a bit more.'}];
 const SYMPTOMS=['Swelling','Redness or warmth','Fever','Calf pain'];
 const WEEK=[{d:'Mon',n:16,s:'done',min:25,reps:120,pb:3,pa:3},{d:'Tue',n:17,s:'rest'},{d:'Wed',n:18,s:'done',min:26,reps:120,pb:3,pa:2},{d:'Thu',n:19,s:'partial',min:12,reps:60,pb:4,pa:3},{d:'Fri',n:20,s:'today'},{d:'Sat',n:21,s:'open'},{d:'Sun',n:22,s:'open'}];
@@ -826,14 +827,14 @@ const doneToday=()=>S.results.length>0;
 const sos=b=>'<span class="sos'+(b?' ban':'')+'">In an emergency, please call 911.</span>';
 const backBtn=to=>'<button class="back" data-go="'+to+'">'+I.back+'Back</button>';
 function mbadge(size){const m=lastMedal();return m?'<span class="mbadge" style="width:'+(size+6)+'px;height:'+(size+6)+'px" title="'+m.name+' medal">'+medalSvg(m.face,size)+'</span>':'';}
-function avatarBtnF(){const m=lastMedal();return '<button class="avatar" data-tab="profile" aria-label="Your profile'+(m?', '+m.name+' medal':'')+'"><img src="img/walter.jpg" alt=""></button>';}
+function avatarBtnF(){const m=lastMedal();return '<button class="avatar" data-tab="profile" aria-label="Your profile'+(m?', '+m.name+' medal':'')+'">'+(window.CR&&CR.live?CR.avatar():'<img src="img/walter.jpg" alt="">')+'</button>';}
 const lastMedal=()=>MEDALS.filter(m=>S.streak>=m.at).pop();
 const nextMedal=()=>MEDALS.find(m=>S.streak<m.at);
 
 /* ---------- tab pages ---------- */
 const P={};
 P.today=()=>{if(S.upView!=null)return upPage();if(S.phase)return waitHome();
- const notice=(S.planUpdated&&!S.planSeen?`<div class="nextup hvisit hnote"><span class="ini pic" style="width:64px;height:64px;flex:0 0 64px"><img src="img/dana.jpg" alt=""></span><div class="nutxt"><p>From Dana Reyes, PT</p><h2>Your PT updated your plan</h2><span>For next week, starting Monday, Nov 23.</span></div><button class="main" style="margin-left:auto;min-width:0" data-go="planChange">See what changed</button></div>`:S.planUpdated?`<div class="nextup hvisit hnote"><div class="nuart" style="width:64px;height:64px;flex:0 0 64px">${I.cal}</div><div class="nutxt"><p>New plan</p><h2>Your new plan starts Monday, Nov 23</h2><span>Sit-to-stands are new, and knee bends go up to 12.</span></div><button class="sec" style="margin-left:auto;min-width:0;height:60px;padding:0 24px;font-size:20px" data-go="planChange">See the plan</button></div>`:'')
+ const notice=(S.planUpdated&&!S.planSeen?`<div class="nextup hvisit hnote"><span class="ini pic" style="width:64px;height:64px;flex:0 0 64px"><img src="img/dana.jpg" alt=""></span><div class="nutxt"><p>From Dana Reyes, PT</p><h2>Your PT updated your plan</h2><span>${window.CR&&CR.live?CR.when():'For next week, starting Monday, Nov 23.'}</span></div><button class="main" style="margin-left:auto;min-width:0" data-go="planChange">See what changed</button></div>`:S.planUpdated?`<div class="nextup hvisit hnote"><div class="nuart" style="width:64px;height:64px;flex:0 0 64px">${I.cal}</div><div class="nutxt"><p>New plan</p><h2>${window.CR&&CR.live?CR.startsLine():'Your new plan starts Monday, Nov 23'}</h2><span>${window.CR&&CR.live?CR.changeLine():'Sit-to-stands are new, and knee bends go up to 12.'}</span></div><button class="sec" style="margin-left:auto;min-width:0;height:60px;padding:0 24px;font-size:20px" data-go="planChange">See the plan</button></div>`:'')
  +(S.visitSet?`<div class="nextup hvisit hnote hvcal"><div class="obcal" style="flex:0 0 auto"><small>NOV</small><b>26</b><span>Thu</span></div><div class="nutxt"><p>Your PT wants to see you</p><h2>Clinic visit, Thursday at 10:30 am</h2><span>Riverside Physical Therapy, 400 Riverside Drive</span></div><button class="sec" style="margin-left:auto;min-width:0;height:60px;padding:0 24px;font-size:20px" data-upv="3">See details</button></div>`:'');
  const lm=lastMedal(),nm=nextMedal();
  const sess=doneToday()?(()=>{const sv=S.prange;S.prange='week';const ps=painSummary(),ch=chartSvg();S.prange=sv;const n=S.results.length;return `<button class="card donecard" data-tab="progress" aria-label="Today's session is done. See your progress">
@@ -843,10 +844,10 @@ P.today=()=>{if(S.upView!=null)return upPage();if(S.phase)return waitHome();
  :`<div class="card sess"><div><p class="eyebrow">Today's session</p><h2>4 exercises, about 25 minutes</h2></div>
    <div class="exlist">${PLAN.map((e,i)=>`<button class="exrow" data-detail="${i}" data-from="today"><img src="${e.img}" alt="" style="object-position:${e.thumb}"><div><b>${e.name}</b></div><span class="chev">${I.chev}</span></button>`).join('')}</div>
    <button class="main" data-go="painBefore" style="width:100%">Start today's session</button></div>`;
- return `<div class="phead"><div><h1>Good morning, Walter</h1>${doneToday()?'':'<p class="sub">Ready for today\'s session?</p>'}</div>${avatarBtnF()}</div>${notice}
+ return `<div class="phead"><div><h1>${window.CR&&CR.live?CR.greet():'Good morning, Walter'}</h1>${doneToday()?'':'<p class="sub">Ready for today\'s session?</p>'}</div>${avatarBtnF()}</div>${notice}
  <div class="todaygrid">${sess}<div class="sideCol">
   <button class="gsbtn" data-go="medals" aria-label="${S.streak} days in a row. See your medals">${streakCard()}</button>
-  <div class="card ptmsg"><div class="who"><span class="ini pic"><img src="img/dana.jpg" alt=""></span><div><b>Dana Reyes, PT</b><span>Riverside Physical Therapy</span></div><button class="sec" data-tab="messages" style="margin-left:auto;min-width:0;height:56px;padding:0 24px">Reply</button></div><p>${esc(S.msgs.filter(m=>!m.me&&m.t).slice(-1)[0].t)}</p><span class="ptwhen">${lastDanaWhen()}</span></div>
+  ${S.msgs.some(m=>!m.me&&m.t)?`<div class="card ptmsg"><div class="who"><span class="ini pic"><img src="img/dana.jpg" alt=""></span><div><b>Dana Reyes, PT</b><span>Riverside Physical Therapy</span></div><button class="sec" data-tab="messages" style="margin-left:auto;min-width:0;height:56px;padding:0 24px">Reply</button></div><p>${esc(S.msgs.filter(m=>!m.me&&m.t).slice(-1)[0].t)}</p><span class="ptwhen">${lastDanaWhen()}</span></div>`:''}
   ${weekCard()}
  </div></div>
  <div class="sectionhead" style="margin-top:28px"><h2>Coming up</h2><button class="linkbtn" data-tab="progress">See your week</button></div>
@@ -915,7 +916,7 @@ function planBody(mode){const w=WEEKPLAN[mode];const app=mode==='app';const td=d
   if(app&&!rest){const ws=(WEEK[i]||{}).s;if(ws==='done'||ws==='partial'){st='done';lab='Done';icn=I.check;}else if(ws==='today'){st=td?'done today':'today';lab=td?'Done':'Today';icn=td?I.check:I.dumbbell;}}
   return `<div class="pwd ${st}" role="img" aria-label="${DAYF[d]} ${n}: ${lab}"><span class="wdn">${d}</span><span class="wdd">${n}</span>${rest?'<span class="wdr">Rest</span>':!app?'<span class="wdr ex">Exercise</span>':''}</div>`;};
  return `<div class="pbh"><span class="ini pic" style="width:88px;height:88px;flex:0 0 88px"><img src="img/dana.jpg" alt=""></span><div><p class="eyebrow" style="margin:0 0 4px">From Dana Reyes, PT</p><h1>Your plan for week ${w.wk}</h1><p class="sub" style="margin:4px 0 0">${w.range}</p></div></div>
- <div class="card wkcard"><div class="wkhd"><h2>5 exercise days, 2 rest days</h2><span class="metachip">${I.clock.replace(/width="\d+" height="\d+"/,'width="20" height="20"')}About 25 minutes a day</span></div>
+ <div class="card wkcard"><div class="wkhd"><h2>${7-RESTD.length} exercise days, ${RESTD.length} rest days</h2><span class="metachip">${I.clock.replace(/width="\d+" height="\d+"/,'width="20" height="20"')}About 25 minutes a day</span></div>
   <div class="wkgrid">${w.days.map(cell).join('')}</div></div>
  <div class="sectionhead" style="margin-top:28px"><h2>Your exercises</h2></div>
  <div class="extiles pbx">${PLAN.map((e,i)=>{const inner=`<span class="exim"><img src="${e.img}" alt="" style="object-position:${e.thumb}"></span><span class="exnm"><b>${e.name}</b><span>${e.sets} sets of ${e.reps}</span><span class="pbneed">${e.need.map(n=>'<span class="metachip">'+(n.includes('chair')?I.chair:I.mat)+n+'</span>').join('')}</span></span>`;return app?`<button class="extile" data-detail="${i}" data-from="myplan">${inner}</button>`:`<div class="extile">${inner}</div>`;}).join('')}</div>
@@ -939,7 +940,7 @@ function dayPills(days,big){const today=d=>d.m===11&&d.n===20;
  return '<div class="dp'+(big?' big':'')+'" role="list">'+days.map(d=>{const done=isDone(d),t=today(d)&&!done;
   const past=(d.m||11)<11||((d.m||11)===11&&d.n<20);return '<div class="pd'+(done?' done':'')+(!done&&past?' miss':'')+(t?' today':'')+(today(d)&&done?' today done':'')+'" role="listitem" aria-label="'+DAYF[d.d]+' '+MON[(d.m||11)-1]+' '+d.n+(done?', exercises done':t?', today':'')+'"><small>'+d.d+'</small><b>'+d.n+'</b></div>';}).join('')+'</div>';}
 function weekCard(){S.weekOff=0;const days=weekDays(0);const dots='<div class="wdots">'+days.map(d=>{const done=isDone(d),t=d.n===20&&!done,past=d.n<20&&!done;return '<div class="wd1"><small>'+d.d[0]+'</small><span class="'+(done?'done':t?'today':past?'miss':'')+'">'+(done?I.check.replace(/28/g,'18'):d.n)+'</span></div>';}).join('')+'</div>';
- return `<button class="card wk" data-tab="progress" aria-label="This week: see your progress"><div class="wkhead"><div><p class="eyebrow" style="margin:0">This week</p><b>Nov 16 to 22</b></div><span class="chev">${I.chev}</span></div>${dots}</button>`;}
+ return `<button class="card wk" data-tab="progress" aria-label="This week: see your progress"><div class="wkhead"><div><p class="eyebrow" style="margin:0">This week</p><b>${WLAB[0]}</b></div><span class="chev">${I.chev}</span></div>${dots}</button>`;}
 function monthGrid(m){const days=allDays().filter(d=>d.m===m);const first=new Date(2026,m-1,1).getDay();const lead=(first+6)%7;const len=new Date(2026,m,0).getDate();
  let h='<div class="mgrid">'+['M','T','W','T','F','S','S'].map(x=>'<div class="wd">'+x+'</div>').join('');for(let i=0;i<lead;i++)h+='<div></div>';
  for(let n=1;n<=len;n++){const d=days.find(x=>x.n===n);const done=d&&isDone(d);const today=m===11&&n===20;const out=!d||(m===11&&n>20);const miss=d&&!done&&!(m===11&&n>=20);
@@ -1013,10 +1014,10 @@ function composeHtml(){if(S.rec!=null)return `<div class="composer"><div class="
  const qr=!S.draft.trim()?`<div class="qrs">${['Thank you!','I have a question','My knee hurts more today'].map(q=>`<button class="qr" data-qr="${q}">${q}</button>`).join('')}</div>`:'';
  return `<div class="composer">${qr}<div class="compose"><button class="mic" data-sheet="attach">${I.plus}Add</button><input id="draft" value="${esc(S.draft)}" placeholder="Write to Dana" aria-label="Message to Dana"><button class="mic" data-recstart>${I.mic}Voice</button><button class="main" style="min-width:0;height:64px" data-send ${S.draft.trim()?'':'disabled'}>${I.send}Send</button></div></div>`;}
 let mid=100;
-function danaReply(t){S.typing=true;if(S.tab==='messages'&&S.screen==='tabs')render();later(()=>{S.typing=false;S.msgs.push({me:false,t,w:'Just now'});if(S.screen==='tabs'&&S.tab==='messages')render();else S.unread++;},2600);}
+function danaReply(t){if(window.CR&&CR.live){CR.sendLast();return;} /* CoRehab: real messages, no auto-reply */S.typing=true;if(S.tab==='messages'&&S.screen==='tabs')render();later(()=>{S.typing=false;S.msgs.push({me:false,t,w:'Just now'});if(S.screen==='tabs'&&S.tab==='messages')render();else S.unread++;},2600);}
 
 P.profile=()=>S.famEdit!=null?famPage():S.remEdit?remPage():S.infoEdit?infoPage():`<div class="phead"><div><h1>Profile</h1></div></div>
- <div class="prof"><div><div class="card idcard"><span class="idav"><img src="img/walter.jpg" alt="Walter"></span><b>${esc(S.info.name)}</b>${lastMedal()?'<span class="mtag">'+medalSvg(lastMedal().face,22)+({7:'1-week',14:'2-week',42:'6-week'})[lastMedal().at]+' streak</span>':''}</div>
+ <div class="prof"><div><div class="card idcard"><span class="idav">${window.CR&&CR.live?CR.avatar():'<img src="img/walter.jpg" alt="Walter">'}</span><b>${esc(S.info.name)}</b>${lastMedal()?'<span class="mtag">'+medalSvg(lastMedal().face,22)+({7:'1-week',14:'2-week',42:'6-week'})[lastMedal().at]+' streak</span>':''}</div>
   <button class="card streak" data-go="medals" style="border:0;width:100%;margin-top:16px;text-align:left">${lastMedal()?medalSvg(lastMedal().face,52):medalSvg('#C98A4B',52,true)}<div><div class="l" style="font-weight:600;color:var(--ink)">My medals</div><div class="nx">See all your medals</div></div><span style="margin-left:auto">${I.chev}</span></button>
   <button class="card streak plnb" data-go="myplan" style="border:0;width:100%;margin-top:12px;text-align:left"><span class="plni">${I.dumbbell}</span><div><div class="l" style="font-weight:600;color:var(--ink)">My plan</div><div class="nx">Week 4, from your PT</div></div><span style="margin-left:auto">${I.chev}</span></button>
   <p class="eyebrow" style="margin:24px 0 10px">Your physical therapist</p>
@@ -1108,7 +1109,7 @@ function sheetHtml(){
   return `<div class="sheet"><div class="box sharebox"><h2>Share your streak</h2>
   <div class="scard" aria-label="Streak card preview"><i class="cf c1"></i><i class="cf c2"></i><i class="cf c3"></i><i class="cf c4"></i><i class="cf c5"></i><i class="cf c6"></i>
    <div class="sctop"><span class="scbrand"><img src="img/mark.png" alt="">Homestretch</span></div>
-   <div class="scmid">${lm?'<span class="scmedal">'+medalSvg(lm.face,76)+'</span>':''}<div><div class="scnum">${S.streak}<span>day streak</span></div><p class="scline">Walter finished ${msg} of knee exercises!</p></div></div>
+   <div class="scmid">${lm?'<span class="scmedal">'+medalSvg(lm.face,76)+'</span>':''}<div><div class="scnum">${S.streak}<span>day streak</span></div><p class="scline">${esc(S.info.name.split(' ')[0])} finished ${msg} of knee exercises!</p></div></div>
    <div class="scweek">${wk.map(d=>`<span class="${isDone(d)?'on':''}">${d.d[0]}</span>`).join('')}</div></div>
   <label>Send to</label><div class="recips">${S.family.map((f,i)=>'<button class="recip" data-recip="'+i+'" aria-pressed="'+S.shareTo.includes(i)+'"><span class="ri">'+esc(f.name[0])+'</span>'+esc(f.name)+'</button>').join('')}</div>
   <label for="sharenote">Add a note <span class="opt">(optional)</span></label><input id="sharenote" value="${esc(S.shareNote||'')}" placeholder="Proud of this one!">
@@ -1337,7 +1338,7 @@ V.after=()=>{const e=PLAN[S.exIdx];S.exNotes=S.exNotes||{};const hard=S.feel==='
  <div style="margin-top:22px"><label class="q" for="exnote">What happened? <span style="font-weight:400;color:var(--ink-muted)">(optional)</span></label><textarea id="exnote" class="exnote" placeholder="For example: my knee hurt when I bent it">${esc(S.exNotes[S.exIdx]||'')}</textarea></div></div>
  `:''}<div class="foot">${hard&&S.painAfter>=7?sos(true):'<span></span>'}<div class="fbtns"><button class="sec fb" data-afterback>Back</button><button class="main fb" id="afterNext" ${S.feel&&(!hard||ok)?'':'disabled'}>Next</button></div></div></div>`;};
 V.wrap=()=>{const ok=S.endPain!=null&&S.botherT;S.bother=S.bother||[];
- return `<div class="scr scroll"><div class="top"><span class="step" style="margin-left:0">All 4 exercises done</span><span style="flex:1"></span></div>
+ return `<div class="scr scroll"><div class="top"><span class="step" style="margin-left:0">All ${PLAN.length} exercises done</span><span style="flex:1"></span></div>
  <h1 style="margin:4px 0 0">One last check-in</h1>
  <div style="margin-top:20px"><p class="q">How does your knee feel now?</p>${painGrid('endPain')}</div>
  <div style="margin-top:26px"><p class="q">Did any exercise bother you? </p><div class="bgrid">${PLAN.map(e=>`<button class="bcard" data-bother="${e.id}" aria-pressed="${S.bother.includes(e.id)}"><img src="${e.img}" alt="" style="object-position:${e.thumb}"><b>${e.name}</b></button>`).join('')}<button class="bcard bnone" data-bother="none" aria-pressed="${!!S.botherT&&!S.bother.length}">${ic('<circle cx="12" cy="12" r="9"/><path d="M8 13.5c1.1 2 2.5 3 4 3s2.9-1 4-3"/><path d="M9 9.5v.5M15 9.5v.5" stroke-width="2.8"/>',44,2)}<b>No, all fine</b></button></div>${S.bother.map(id=>{const e=PLAN.find(x=>x.id===id);const w=(S.whys||{})[id];S.whyO=S.whyO||{};return `<div class="whyrow"><b>${e.name}: what happened?</b><div class="whyc">${['Pain','Too hard to do','Swelling','Felt unsteady','Clicking or popping','Something else'].map(r=>`<button class="choice" data-why="${id}" data-v="${r}" aria-pressed="${w===r}">${r}</button>`).join('')}</div>${w==='Something else'?`<input class="whyin" data-whyo="${id}" value="${esc(S.whyO[id]||'')}" placeholder="Tell us what happened" aria-label="What happened with ${e.name}">`:''}</div>`;}).join('')}</div>
@@ -1378,7 +1379,7 @@ V.discharge=()=>{const d=allDays().filter(x=>isDone(x)&&x.min);const reps=d.redu
 V.planChange=()=>{const np=newPlan();return `<div class="scr scroll"><div class="top">${backBtn('tab:today')}<span style="flex:1"></span></div>
  <div class="pchead"><span class="ini pic" style="width:72px;height:72px;flex:0 0 72px"><img src="img/dana.jpg" alt=""></span><div><p class="eyebrow" style="margin:0 0 4px">From Dana Reyes, PT</p><h1 style="margin:0">Your plan for next week</h1><p class="sub" style="margin:4px 0 0">Starts Monday, Nov 23</p></div></div>
  <div class="card chg2">${np.map((e,i)=>[e,i]).sort((a,b)=>(CHANGES[a[1]].k==='same')-(CHANGES[b[1]].k==='same')).map(([e,i])=>{const c=CHANGES[i];return `<div class="chg2r ${c.k}"><img src="${e.img}" alt="" style="object-position:${e.thumb}"><div class="chg2n"><b>${e.name}</b></div><div class="chg2s">${c.k==='up'?`<s>${c.was}</s><span class="arr">${I.next}</span>`:''}<b>${e.sets} sets of ${e.reps}</b></div><span class="tagc ${c.k}">${c.l}</span></div>`;}).join('')}</div>
- <div class="card ptmsg" style="margin-top:16px"><div class="who"><span class="ini pic"><img src="img/dana.jpg" alt=""></span><div><b>A note from your PT</b></div></div><p>Nice steady week, Walter. Your knee bends well now, so I'm adding sit-to-stands to build strength for getting up from a chair. Your form on the knee bends has been steady, so we'll go up to 12. Keep holding the chair, and tell me if your knee feels sore.</p></div>
+ <div class="card ptmsg" style="margin-top:16px"><div class="who"><span class="ini pic"><img src="img/dana.jpg" alt=""></span><div><b>A note from your PT</b></div></div><p>${window.CR&&CR.live?esc(CR.ptNote()):'Nice steady week, Walter. Your knee bends well now, so I\'m adding sit-to-stands to build strength for getting up from a chair. Your form on the knee bends has been steady, so we\'ll go up to 12. Keep holding the chair, and tell me if your knee feels sore.'}</p></div>
  <div class="foot"><span></span><div class="fbtns"><button class="sec fb" data-planask>${I.chat}Ask your PT</button><button class="main fb" data-planok>Got it</button></div></div></div>`;};
 
 /* ---------- render ---------- */
@@ -1454,6 +1455,7 @@ function finishSession(early){S.streak++;S.medalNew=MEDALS.find(m=>m.at===S.stre
 
 dev.addEventListener('click',ev=>{
  const b=ev.target.closest('button');if(!b)return;const d=b.dataset;
+ if(window.CR)CR.beforeClick(b,d); /* CoRehab: send to the server (patient-live.js) */
  if(d.tab){toTab(d.tab);return;}
  if(d.obstart!==undefined){S.ob=obFresh();S.obpain=null;go('onboard');return;}
  if(d.obscan!==undefined){S.ob.scanning=true;render();later(()=>{S.ob.scanning=false;S.ob.joined=true;render();},1600);return;}
@@ -1588,11 +1590,13 @@ jump.addEventListener('change',()=>{const v=jump.value;
  if(v==='newplan'){S.planUpdated=true;S.planSeen=true;S.visitSet=false;toTab('today');return;}
  if(v==='visit'){S.visitSet=true;toTab('today');return;}
  go(v);});
-document.getElementById('restart').addEventListener('click',()=>{S=fresh();clearT();render();});
+document.getElementById('restart').addEventListener('click',()=>{S=fresh();clearT();render();if(window.CR)CR.restart();});
 document.getElementById('simvisit').addEventListener('click',()=>{S.phase='ready';toTab('today');});
 document.getElementById('simplan').addEventListener('click',()=>{S.planUpdated=!S.planUpdated;S.planSeen=false;toTab('today');});
 document.getElementById('skip').addEventListener('click',()=>{if(S.screen!=='exercise')return;clearT();const e=PLAN[S.exIdx];S.results.push({id:e.id,reps:target(e)*nsets(e)});finishExercise();});
-S=fresh();render();fit();
+S=fresh();
+window.CRAPP={get S(){return S},PLAN,STS,CHANGES,WEEK,LASTWEEK,RESTD,MEDALS,WLAB,WEEKPLAN,render,go,toTab,target,nsets}; /* CoRehab hooks */
+render();fit();if(window.CR)CR.init();
 })();
 </script>
 

@@ -1,6 +1,8 @@
-﻿*.db
+*.db
 __pycache__/
 node_modules/
 frontend/dist/
 sim_out/
+model_out/
 .env
+.pytest_cache/

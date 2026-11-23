@@ -94,7 +94,26 @@ CREATE TABLE IF NOT EXISTS intakes (
 );
 """
 
+# Columns added after the first version. connect() adds any that are missing, so old databases keep working.
+NEW_COLUMNS = {
+    "patients": [("dob", "TEXT"), ("phone", "TEXT"), ("status", "TEXT DEFAULT 'active'"), ("rest_days", "TEXT"),
+                 ("pt_private_notes", "TEXT"), ("consent_json", "TEXT"), ("consent_at", "TEXT"),
+                 ("created_at", "TEXT"), ("join_code", "TEXT")],
+    "checkins": [("worry_json", "TEXT"), ("pain_end", "INTEGER"), ("bothered_json", "TEXT"), ("end_note", "TEXT"),
+                 ("stopped_early", "INTEGER DEFAULT 0"), ("stop_reason", "TEXT"), ("stop_pain", "INTEGER"),
+                 ("ended_at", "TEXT")],
+    "exercise_logs": [("feeling", "TEXT"), ("note", "TEXT")],
+    "alerts": [("status", "TEXT DEFAULT 'open'"), ("source", "TEXT")],
+    "adjustment_requests": [("kind", "TEXT DEFAULT 'weekly'"), ("decisions_json", "TEXT")],
+}
+
 PAIN_LOCATIONS = ["none", "front", "back", "inner", "outer", "whole knee"]
+FEELINGS = ["easy", "just_right", "too_hard"]          # asked after each exercise
+URGENT_SYMPTOMS = ["swelling", "redness or warmth", "fever", "calf pain"]  # "Is anything worrying you?"
+BOTHER_REASONS = ["pain", "too hard to do", "swelling", "felt unsteady", "clicking or popping", "something else"]
+STOP_REASONS = ["tired", "pain", "no time", "something else"]
+WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+DEFAULT_REST_DAYS = ["Tue", "Sun"]
 
 # The 10 exercises the PT can prescribe (all camera-checkable). The ID is what detection sends.
 EXERCISES = {
@@ -135,6 +154,12 @@ def connect(path=DB_PATH):
     con = sqlite3.connect(path, check_same_thread=False)  # Gradio calls from worker threads
     con.row_factory = sqlite3.Row
     con.executescript(SCHEMA)
+    for table, cols in NEW_COLUMNS.items():
+        have = {r["name"] for r in con.execute(f"PRAGMA table_info({table})")}
+        for name, kind in cols:
+            if name not in have:
+                con.execute(f"ALTER TABLE {table} ADD COLUMN {name} {kind}")
+    con.commit()
     return con
 
 
@@ -163,12 +188,34 @@ def adjusted_reps(reps, factor):
 
 # ---------- PT side ----------
 
-def add_patient(con, patient_id, name, surgery_date, operated_side, goal=""):
+def add_patient(con, patient_id, name, surgery_date, operated_side, goal="", **extra):
+    """Create or update a patient. extra: dob, phone, status, rest_days (list), join_code."""
     con.execute(
-        "INSERT OR REPLACE INTO patients VALUES (?,?,?,?,?)",
-        (patient_id, name, surgery_date, operated_side, goal),
+        "INSERT INTO patients (patient_id, name, surgery_date, operated_side, goal, created_at) VALUES (?,?,?,?,?,?)"
+        " ON CONFLICT(patient_id) DO UPDATE SET name=excluded.name, surgery_date=excluded.surgery_date,"
+        " operated_side=excluded.operated_side, goal=excluded.goal",
+        (patient_id, name, surgery_date, operated_side, goal, dt.datetime.now().isoformat(timespec="seconds")),
     )
+    for key in ("dob", "phone", "status", "join_code"):
+        if extra.get(key) is not None:
+            con.execute(f"UPDATE patients SET {key}=? WHERE patient_id=?", (extra[key], patient_id))
+    if extra.get("rest_days") is not None:
+        set_rest_days(con, patient_id, extra["rest_days"], commit=False)
     con.commit()
+
+
+def set_rest_days(con, patient_id, days, commit=True):
+    bad = [d for d in days if d not in WEEKDAYS]
+    if bad:
+        raise ValueError(f"Unknown day(s) {bad}. Use {WEEKDAYS}.")
+    con.execute("UPDATE patients SET rest_days=? WHERE patient_id=?", (json.dumps(list(days)), patient_id))
+    if commit:
+        con.commit()
+
+
+def rest_days(con, patient_id):
+    r = con.execute("SELECT rest_days FROM patients WHERE patient_id=?", (patient_id,)).fetchone()
+    return json.loads(r["rest_days"]) if r and r["rest_days"] else list(DEFAULT_REST_DAYS)
 
 
 def set_plan(con, patient_id, items, approved_by, start_date=None):
@@ -198,26 +245,46 @@ def current_plan(con, patient_id):
 
 # ---------- Patient side: daily ----------
 
-def daily_checkin(con, patient_id, pain_today, date=None, pain_location="none"):
+def add_alert(con, patient_id, date, tier, reason, source=""):
+    con.execute("INSERT INTO alerts (patient_id, date, tier, reason, status, source) VALUES (?,?,?,?, 'open', ?)",
+                (patient_id, date, tier, reason, source))
+
+
+def daily_checkin(con, patient_id, pain_today, date=None, pain_location="none", worry=None):
     """Ask pain before the session; return today's plan with adjusted reps.
 
+    worry: {"symptoms": [...from URGENT_SYMPTOMS], "other": "free text"} from "Is anything worrying you today?"
+    Pain >= 7 or any named symptom: urgent alert to the PT and no exercise today.
+    Free text only: a review alert, the session goes ahead.
     pain_location is stored for the PT and the weekly summary; it does not change reps yet.
     """
     date = _today(date)
     if not current_plan(con, patient_id):
         raise ValueError(f"No plan for {patient_id}. The PT must enter a plan first.")
+    worry = worry or {}
+    symptoms = [str(x).lower() for x in worry.get("symptoms") or []]
+    unknown = [x for x in symptoms if x not in URGENT_SYMPTOMS]
+    if unknown:
+        raise ValueError(f"Unknown symptom(s) {unknown}. Use {URGENT_SYMPTOMS}, or put it in 'other'.")
+    other = (worry.get("other") or "").strip()
     action, factor = rep_rule(pain_today)
+    if symptoms:
+        action, factor = "rest", 0.0
     con.execute(
-        "INSERT INTO checkins (patient_id, date, pain_today, pain_location, action, rep_factor) VALUES (?,?,?,?,?,?)"
+        "INSERT INTO checkins (patient_id, date, pain_today, pain_location, action, rep_factor, worry_json)"
+        " VALUES (?,?,?,?,?,?,?)"
         " ON CONFLICT(patient_id, date) DO UPDATE SET pain_today=excluded.pain_today,"
-        " pain_location=excluded.pain_location, action=excluded.action, rep_factor=excluded.rep_factor",
-        (patient_id, date, pain_today, pain_location, action, factor),
+        " pain_location=excluded.pain_location, action=excluded.action, rep_factor=excluded.rep_factor,"
+        " worry_json=excluded.worry_json",
+        (patient_id, date, pain_today, pain_location, action, factor,
+         json.dumps({"symptoms": symptoms, "other": other}) if (symptoms or other) else None),
     )
-    if action == "rest":
-        con.execute(
-            "INSERT INTO alerts (patient_id, date, tier, reason) VALUES (?,?,?,?)",
-            (patient_id, date, "urgent", f"Pain {pain_today}/10 before session; exercise skipped today"),
-        )
+    if pain_today >= STOP_PAIN:
+        add_alert(con, patient_id, date, "urgent", f"Pain {pain_today}/10 before session; exercise skipped today", "checkin")
+    if symptoms:
+        add_alert(con, patient_id, date, "urgent", f"Reported {', '.join(symptoms)} before session; exercise skipped today", "checkin")
+    if other:
+        add_alert(con, patient_id, date, "review", f"Worried about: {other}", "checkin")
     con.commit()
     checkin_id = con.execute(
         "SELECT checkin_id FROM checkins WHERE patient_id=? AND date=?", (patient_id, date)
@@ -237,7 +304,7 @@ def daily_checkin(con, patient_id, pain_today, date=None, pain_location="none"):
         "reduced": "Lighter session today because of your pain.",
         "rest": "Please rest today. We've told your PT.",
     }
-    return {"checkin_id": checkin_id, "date": date, "pain_today": pain_today,
+    return {"checkin_id": checkin_id, "date": date, "pain_today": pain_today, "urgent": action == "rest",
             "action": action, "message": messages[action], "exercises": today}
 
 
@@ -245,7 +312,9 @@ def log_exercise(con, checkin_id, result):
     """Store one exercise result from movement analysis.
 
     result: {"exercise_id", "sets_done", "reps_done", "form_scores": [0-1 per rep],
-             "error_counts": {...}, "pain_after": 0-10}
+             "error_counts": {...}, "feeling": easy / just_right / too_hard,
+             "pain_after": 0-10 (asked only when too hard), "note": "..."}
+    Detection fills reps and form; the patient fills feeling, pain and note.
     """
     ck = con.execute("SELECT * FROM checkins WHERE checkin_id=?", (checkin_id,)).fetchone()
     if ck is None:
@@ -258,21 +327,62 @@ def log_exercise(con, checkin_id, result):
     scores = result.get("form_scores") or []
     form = round(mean(scores), 3) if scores else None
     pain_after = result.get("pain_after")
+    feeling = result.get("feeling")
+    if feeling is not None and feeling not in FEELINGS:
+        raise ValueError(f"feeling must be one of {FEELINGS}")
     con.execute(
         "INSERT INTO exercise_logs (checkin_id, patient_id, date, exercise_id, planned_sets, planned_reps,"
-        " target_reps, sets_done, reps_done, form_score, errors_json, pain_after)"
-        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+        " target_reps, sets_done, reps_done, form_score, errors_json, pain_after, feeling, note)"
+        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (checkin_id, ck["patient_id"], ck["date"], result["exercise_id"], item["sets"], item["reps"],
          adjusted_reps(item["reps"], ck["rep_factor"]), int(result["sets_done"]), int(result["reps_done"]),
-         form, json.dumps(result.get("error_counts") or {}), pain_after),
+         form, json.dumps(result.get("error_counts") or {}), pain_after, feeling, result.get("note")),
     )
     if pain_after is not None and pain_after >= STOP_PAIN:
-        con.execute(
-            "INSERT INTO alerts (patient_id, date, tier, reason) VALUES (?,?,?,?)",
-            (ck["patient_id"], ck["date"], "urgent",
-             f"Pain {pain_after}/10 after {item['exercise_name']}"),
-        )
+        add_alert(con, ck["patient_id"], ck["date"], "urgent", f"Pain {pain_after}/10 after {item['exercise_name']}", "exercise")
     con.commit()
+
+
+def end_session(con, checkin_id, pain_end, bothered=None, note=""):
+    """End-of-session check-in. bothered: [{"exercise_id", "reason", "other"}]; pain >= 7 is urgent."""
+    ck = con.execute("SELECT * FROM checkins WHERE checkin_id=?", (checkin_id,)).fetchone()
+    if ck is None:
+        raise ValueError("unknown checkin_id")
+    if not 0 <= int(pain_end) <= 10:
+        raise ValueError("pain_end must be 0-10")
+    bothered = bothered or []
+    for b in bothered:
+        if b.get("exercise_id") not in EXERCISES:
+            raise ValueError(f"Unknown exercise '{b.get('exercise_id')}'")
+        if str(b.get("reason", "")).lower() not in BOTHER_REASONS:
+            raise ValueError(f"reason must be one of {BOTHER_REASONS}")
+        b["reason"] = b["reason"].lower()
+    con.execute("UPDATE checkins SET pain_end=?, bothered_json=?, end_note=?, ended_at=? WHERE checkin_id=?",
+                (int(pain_end), json.dumps(bothered), note or None, dt.datetime.now().isoformat(timespec="seconds"),
+                 checkin_id))
+    if int(pain_end) >= STOP_PAIN:
+        add_alert(con, ck["patient_id"], ck["date"], "urgent", f"Pain {pain_end}/10 at the end of the session", "end")
+    con.commit()
+    return {"ok": True, "urgent": int(pain_end) >= STOP_PAIN}
+
+
+def stop_session(con, checkin_id, reason, other="", pain=None):
+    """Ending early. Reps done so far are already saved; the day still counts toward the streak."""
+    ck = con.execute("SELECT * FROM checkins WHERE checkin_id=?", (checkin_id,)).fetchone()
+    if ck is None:
+        raise ValueError("unknown checkin_id")
+    reason = str(reason or "").lower()
+    if reason and reason not in STOP_REASONS:
+        raise ValueError(f"reason must be one of {STOP_REASONS}")
+    if pain is not None and not 0 <= int(pain) <= 10:
+        raise ValueError("pain must be 0-10")
+    con.execute("UPDATE checkins SET stopped_early=1, stop_reason=?, stop_pain=?, ended_at=? WHERE checkin_id=?",
+                ((reason + (f": {other}" if other else "")) or None, pain,
+                 dt.datetime.now().isoformat(timespec="seconds"), checkin_id))
+    if pain is not None and int(pain) >= STOP_PAIN:
+        add_alert(con, ck["patient_id"], ck["date"], "urgent", f"Stopped early with pain {pain}/10", "stop")
+    con.commit()
+    return {"ok": True, "urgent": pain is not None and int(pain) >= STOP_PAIN}
 
 
 # ---------- End of week: input for plan adjustment ----------
@@ -284,7 +394,7 @@ def weekly_summary(con, patient_id, week_end=None, days=7):
     s, e = start.isoformat(), end.isoformat()
 
     checkins = [dict(r) for r in con.execute(
-        "SELECT date, pain_today, pain_location, action FROM checkins"
+        "SELECT date, pain_today, pain_location, action, pain_end, bothered_json, stopped_early, worry_json FROM checkins"
         " WHERE patient_id=? AND date BETWEEN ? AND ? ORDER BY date",
         (patient_id, s, e)).fetchall()]
     patient = con.execute("SELECT * FROM patients WHERE patient_id=?", (patient_id,)).fetchone()
@@ -307,6 +417,9 @@ def weekly_summary(con, patient_id, week_end=None, days=7):
             for k, v in json.loads(r["errors_json"] or "{}").items():
                 errors[k] = errors.get(k, 0) + v
         half = len(forms) // 2
+        feel = {f: sum(1 for r in rows if r.get("feeling") == f) for f in FEELINGS}
+        bothered = sum(1 for c in checkins for b in json.loads(c["bothered_json"] or "[]")
+                       if b.get("exercise_id") == item["exercise_id"])
         exercises.append({
             "exercise_id": item["exercise_id"],
             "exercise_name": item["exercise_name"],
@@ -319,6 +432,8 @@ def weekly_summary(con, patient_id, week_end=None, days=7):
             "pain_after_max": max(pains) if pains else None,
             "high_pain_days": high_days,
             "error_counts": errors,
+            "feeling_counts": feel,          # easy / just_right / too_hard, one per session
+            "bothered_days": bothered,       # named at the end of a session as a problem
         })
 
     locations = {}
@@ -346,6 +461,11 @@ def weekly_summary(con, patient_id, week_end=None, days=7):
         "days_rest": sum(c["action"] == "rest" for c in checkins),
         "pain_today_avg": round(mean(c["pain_today"] for c in checkins), 1) if checkins else None,
         "pain_today_by_day": {c["date"]: c["pain_today"] for c in checkins},
+        "pain_end_avg": round(mean(c["pain_end"] for c in checkins if c["pain_end"] is not None), 1)
+                        if any(c["pain_end"] is not None for c in checkins) else None,
+        "sessions_stopped_early": sum(1 for c in checkins if c["stopped_early"]),
+        "worry_days": sum(1 for c in checkins if c["worry_json"]),
+        "planned_days": 7 - len(rest_days(con, patient_id)),
         "exercises": exercises,
         "alerts": alerts,
     }
@@ -360,10 +480,24 @@ MAX_REPS = 15
 PAUSE_DAYS = 2  # pause an exercise after pain >= 7 on this many days in the week; one day -> lighter
 
 
-def _ready(ex):
-    """This exercise went well enough this week to make it harder."""
-    return (ex["days_done"] >= MIN_DAYS and ex["form_avg"] is not None and ex["form_avg"] >= PROGRESS_FORM
-            and ex["pain_after_avg"] is not None and ex["pain_after_avg"] <= PROGRESS_PAIN
+TOO_HARD_DAYS = 2  # "too hard" on this many sessions in a week -> lighter
+EASY_DAYS = 3      # "easy" on this many sessions counts as a sign of readiness
+
+
+def _pain_signal(ex, summary):
+    """Pain after this exercise. Patients rate pain only when it felt too hard, so fall back to end-of-session pain."""
+    return ex["pain_after_avg"] if ex["pain_after_avg"] is not None else summary.get("pain_end_avg")
+
+
+def _ready(ex, summary=None):
+    """This exercise went well enough this week to make it harder.
+    Form counts only when the camera measured it; never ready if it felt too hard."""
+    feel = ex.get("feeling_counts") or {}
+    pain = _pain_signal(ex, summary or {})
+    form_ok = ex["form_avg"] is None or ex["form_avg"] >= PROGRESS_FORM
+    return (ex["days_done"] >= MIN_DAYS and form_ok and feel.get("too_hard", 0) == 0
+            and (ex["form_avg"] is not None or feel.get("easy", 0) + feel.get("just_right", 0) >= MIN_DAYS)
+            and (pain is None or pain <= PROGRESS_PAIN)
             and ex["reps_done_share"] >= PROGRESS_SHARE)
 
 
@@ -395,9 +529,15 @@ def goal_draft(summary):
             action, why, new_sets, new_reps = ("pause", f"Pain reached {pain_max}/10 after it on {ex['high_pain_days']} days. "
                                                "Paused for a week.", 0, 0)
         elif (pain_max is not None and pain_max >= STOP_PAIN) or (form is not None and form < EASIER_FORM) \
-                or (pain_avg is not None and pain_avg >= EASIER_PAIN) or (trend is not None and trend <= EASIER_TREND):
+                or (pain_avg is not None and pain_avg >= EASIER_PAIN) or (trend is not None and trend <= EASIER_TREND) \
+                or (ex.get("feeling_counts") or {}).get("too_hard", 0) >= TOO_HARD_DAYS \
+                or ex.get("bothered_days", 0) >= TOO_HARD_DAYS:
             new_reps = adjusted_reps(reps, 0.7)
             bits = []
+            if (ex.get("feeling_counts") or {}).get("too_hard", 0) >= TOO_HARD_DAYS:
+                bits.append(f"it felt too hard {ex['feeling_counts']['too_hard']} times")
+            if ex.get("bothered_days", 0) >= TOO_HARD_DAYS:
+                bits.append(f"you said it bothered you on {ex['bothered_days']} days")
             if pain_max is not None and pain_max >= STOP_PAIN:
                 bits.append(f"pain reached {pain_max}/10 once")
             if pain_avg is not None and pain_avg >= EASIER_PAIN:
@@ -408,17 +548,25 @@ def goal_draft(summary):
                 bits.append("form got worse during the week")
             action, why = "easier", f"Fewer reps because {' and '.join(bits)}."
         elif target and sets * reps < target[0] * target[1]:
-            if _ready(ex):
+            if _ready(ex, summary):
                 if reps < target[1]:
                     new_reps = min(target[1], reps + 2)
                 else:
                     new_sets = min(target[0], sets + 1)
                 action = "progress"
-                why = (f"Your goal needs {_dose(*target)}. Form {form} and pain {pain_avg}/10 show you're ready "
-                       f"for the next step.")
+                easy = (ex.get("feeling_counts") or {}).get("easy", 0)
+                signs = []
+                if easy:
+                    signs.append(f"it felt easy {easy} time{'s' if easy > 1 else ''}")
+                if form is not None:
+                    signs.append(f"form was {form}")
+                pain = _pain_signal(ex, summary)
+                if pain is not None:
+                    signs.append(f"pain stayed at {pain}/10")
+                why = f"Your goal needs {_dose(*target)}. {' and '.join(signs).capitalize() or 'This week went well'}, so you're ready for the next step."
             else:
                 action = "hold"
-                why = f"Your goal needs {_dose(*target)}; we'll step up once form is 0.8+ and pain stays 3/10 or less."
+                why = f"Your goal needs {_dose(*target)}; we'll step up once it feels comfortable and pain stays 3/10 or less."
         elif target:
             action, why = "hold", "Already at the level your goal needs."
         else:
@@ -431,7 +579,7 @@ def goal_draft(summary):
     missing = [eid for eid in targets if eid not in in_plan]
     days = summary["days_checked_in"] - summary["days_rest"]
     pain_week = summary["pain_today_avg"]
-    week_ok = (days >= MIN_DAYS and pain_week is not None and pain_week <= PROGRESS_PAIN
+    week_ok = (days >= min(MIN_DAYS, summary.get("planned_days", 7)) and pain_week is not None and pain_week <= PROGRESS_PAIN
                and not any(i["action"] in ("easier", "pause") for i in items))
     waiting = []
     if missing and week_ok:
@@ -449,7 +597,7 @@ def goal_draft(summary):
     direction = "mixed" if harder and lighter else "harder" if harder else "lighter" if lighter else "same"
 
     forms = [e["form_avg"] for e in summary["exercises"] if e["form_avg"] is not None]
-    week_line = (f"This week you exercised {days} of 7 days, with average pain {pain_week if pain_week is not None else '–'}/10"
+    week_line = (f"This week you exercised {days} of {summary.get('planned_days', 7)} planned days, with average pain {pain_week if pain_week is not None else '–'}/10"
                  + (f" and form {round(mean(forms), 2)}." if forms else "."))
     lead = {
         "harder": f"Your goal, \"{goal['label']}\", needs more {goal['focus']} than your current plan, and you're ready for more.",
@@ -499,26 +647,126 @@ Rule-based draft:
 """
 
 
-def llm_draft(summary, rules, model=None):
-    """Optional LLM draft (OpenAI). Returns None if no API key or the call fails."""
+LLM_STATE = {"last_error": None, "last_ok": None}   # shown at /api/llm-status
+
+
+def llm_model():
     import os
+    return os.environ.get("LLM_MODEL", "gpt-6.2-sol")
+
+
+def _chat_http(prompt, model, params):
+    """Chat Completions over plain HTTPS (standard library only), used when the openai package is not installed."""
+    import os
+    import urllib.error
+    import urllib.request
+    base = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
+    body = json.dumps({"model": model, "messages": [{"role": "user", "content": prompt}], **params}).encode()
+    req = urllib.request.Request(base + "/chat/completions", data=body, headers={
+        "Content-Type": "application/json", "Authorization": "Bearer " + os.environ["OPENAI_API_KEY"]})
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:
+            return json.loads(r.read())["choices"][0]["message"]["content"]
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode(errors="replace")
+        try:
+            detail = json.loads(detail)["error"]["message"]
+        except Exception:
+            pass
+        raise RuntimeError(f"Error code: {e.code} - {detail}") from None
+
+
+def _parse_json(text):
+    """JSON from the reply, also when the model wraps it in ```json fences or adds a sentence around it."""
+    text = (text or "").strip()
+    try:
+        return json.loads(text)
+    except ValueError:
+        a, b = text.find("{"), text.rfind("}")
+        if a >= 0 and b > a:
+            return json.loads(text[a:b + 1])
+        raise
+
+
+def llm_json(prompt, model=None):
+    """One JSON-mode call to OpenAI. Returns the parsed JSON, or None (no key, or the call failed).
+    Failures are printed and kept in LLM_STATE so a wrong key or model doesn't fail silently."""
+    import os
+    import datetime as _dt
     if not os.environ.get("OPENAI_API_KEY"):
         return None
     try:
-        from openai import OpenAI
-        client = OpenAI()
-        targets = {EXERCISES[k]: _dose(*v) for k, v in GOALS[rules["goal"]]["targets"].items()}
-        resp = client.chat.completions.create(
-            model=model or os.environ.get("LLM_MODEL", "gpt-6.2-sol"),
-            temperature=0,
-            response_format={"type": "json_object"},
-            messages=[{"role": "user", "content": LLM_PROMPT.replace("{summary}", json.dumps(summary))
-                       .replace("{rules}", json.dumps(rules)).replace("{targets}", json.dumps(targets))}],
-        )
-        draft = json.loads(resp.choices[0].message.content)
-    except Exception:
+        try:
+            from openai import OpenAI
+        except ImportError:
+            OpenAI = None
+        # Optional settings; some models reject them (e.g. temperature), so drop the rejected one and retry.
+        params = {"response_format": {"type": "json_object"}}
+        if os.environ.get("LLM_TEMPERATURE"):
+            params["temperature"] = float(os.environ["LLM_TEMPERATURE"])
+        for _ in range(3):
+            try:
+                if OpenAI is not None:
+                    resp = OpenAI().chat.completions.create(model=model or llm_model(),
+                                                            messages=[{"role": "user", "content": prompt}], **params)
+                    content = resp.choices[0].message.content
+                else:
+                    content = _chat_http(prompt, model or llm_model(), params)
+                break
+            except Exception as e:
+                bad = next((k for k in list(params) if k in str(e) and ("400" in str(e) or "nsupported" in str(e))), None)
+                if not bad:
+                    raise
+                print(f"[LLM] model does not accept '{bad}', retrying without it")
+                params.pop(bad)
+        out = _parse_json(content)
+        LLM_STATE.update(last_ok=_dt.datetime.now().isoformat(timespec="seconds"), last_error=None)
+        return out
+    except Exception as e:
+        LLM_STATE["last_error"] = f"{type(e).__name__}: {e}"[:300]
+        print(f"[LLM error] {LLM_STATE['last_error']}  -> using the rules instead")
         return None
-    return validate_draft(draft, summary, fallback=rules)
+
+
+def llm_status(test_call=True):
+    """Is the LLM set up? test_call=True makes one tiny request to check the key and model."""
+    import os
+    key = os.environ.get("OPENAI_API_KEY", "")
+    out = {"key_set": bool(key), "key_hint": (key[:3] + "…" + key[-4:]) if len(key) > 8 else "", "model": llm_model(),
+           "connected": False, "error": None}
+    if not key:
+        out["error"] = "OPENAI_API_KEY is not set. Put it in backend/.env (see .env.example)."
+        return out
+    if test_call:
+        r = llm_json('Reply with this JSON only: {"ok": true}')
+        out["connected"] = bool(r and r.get("ok"))
+        out["error"] = None if out["connected"] else LLM_STATE["last_error"] or "No valid reply."
+    return out
+
+
+def ai_note(use_llm):
+    """Why a draft came from the rules, shown to the PT next to the draft."""
+    import os
+    if not use_llm:
+        return "AI off for this draft"
+    if not os.environ.get("OPENAI_API_KEY"):
+        return "AI not connected"
+    return "AI failed: " + (LLM_STATE.get("last_error") or "no answer")
+
+
+def llm_draft(summary, rules, model=None):
+    """Optional LLM draft (OpenAI). Returns None if no API key or the call fails."""
+    targets = {EXERCISES[k]: _dose(*v) for k, v in GOALS[rules["goal"]]["targets"].items()}
+    draft = llm_json(LLM_PROMPT.replace("{summary}", json.dumps(summary)).replace("{rules}", json.dumps(rules))
+                     .replace("{targets}", json.dumps(targets)), model)
+    if draft is None:
+        return None
+    out = validate_draft(draft, summary, fallback=rules)
+    if out is rules:
+        LLM_STATE["last_error"] = "the AI draft did not pass the code check"
+        print("[LLM] weekly draft did not pass the code check -> using the rules draft")
+        return None
+    return out
 
 
 def validate_draft(draft, summary, fallback):
@@ -550,12 +798,12 @@ def create_adjustment_request(con, patient_id, week_end=None, use_llm=True):
     """Build the weekly summary and goal-based draft, store it as a pending request for the PT."""
     summary = weekly_summary(con, patient_id, week_end)
     rules = goal_draft(summary)
-    draft = (llm_draft(summary, rules) if use_llm else None) or rules
-    con.execute("UPDATE adjustment_requests SET status='superseded' WHERE patient_id=? AND status='pending'",
-                (patient_id,))
+    draft = (llm_draft(summary, rules) if use_llm else None) or dict(rules, ai_note=ai_note(use_llm))
+    con.execute("UPDATE adjustment_requests SET status='superseded' WHERE patient_id=? AND status='pending'"
+                " AND COALESCE(kind, 'weekly')='weekly'", (patient_id,))
     cur = con.execute(
-        "INSERT INTO adjustment_requests (patient_id, week_end, summary_json, draft_json, draft_source, status)"
-        " VALUES (?,?,?,?,?, 'pending')",
+        "INSERT INTO adjustment_requests (patient_id, week_end, summary_json, draft_json, draft_source, status, kind)"
+        " VALUES (?,?,?,?,?, 'pending', 'weekly')",
         (patient_id, summary["week"]["end"], json.dumps(summary), json.dumps(draft), draft["source"]),
     )
     con.commit()
@@ -569,28 +817,52 @@ def pending_requests(con):
     return [dict(r) for r in rows]
 
 
-def decide_request(con, request_id, approve, final_items=None, pt_name="PT", pt_note=""):
-    """PT approves (optionally edited) or rejects. Approval replaces the patient's plan."""
+def apply_decisions(draft_items, before_items, decisions):
+    """Per-suggestion accept/reject. A rejected change keeps the exercise as it was (a rejected 'add' is dropped)."""
+    before = {i["exercise_id"]: i for i in before_items}
+    out = []
+    for it in draft_items:
+        d = decisions.get(it["exercise_id"], "accept")
+        if d not in ("accept", "reject"):
+            raise ValueError("Each decision must be 'accept' or 'reject'.")
+        if d == "accept" or it.get("action") == "hold":
+            out.append(it)
+        elif it["exercise_id"] in before:
+            b = before[it["exercise_id"]]
+            out.append({**it, "action": "hold", "sets": b["sets"], "reps": b["reps"],
+                        "reason": "Kept as it was (PT's choice)."})
+    return out
+
+
+def decide_request(con, request_id, approve, final_items=None, pt_name="PT", pt_note="", decisions=None):
+    """PT approves (optionally edited, or accept/reject per suggestion) or rejects ("Keep current plan").
+    Approval replaces the patient's plan. decisions: {exercise_id: "accept" | "reject"}."""
     req = con.execute("SELECT * FROM adjustment_requests WHERE request_id=?", (request_id,)).fetchone()
     if req is None or req["status"] != "pending":
         raise ValueError("No pending request with that id.")
     draft_items = json.loads(req["draft_json"])["items"]
+    if final_items is None and decisions:
+        final_items = apply_decisions(draft_items, current_plan(con, req["patient_id"]), decisions)
     final_items = final_items if final_items is not None else draft_items
+    if approve and not any(int(i["sets"]) > 0 for i in final_items):
+        raise ValueError("This plan has no exercises left. Keep at least one, or keep the current plan.")
     edited = int(json.dumps(final_items, sort_keys=True) != json.dumps(draft_items, sort_keys=True))
     now = dt.datetime.now().isoformat(timespec="seconds")
     if approve:
         new_plan = [{"exercise_id": i["exercise_id"], "exercise_name": i["exercise_name"],
                      "sets": i["sets"], "reps": i["reps"]} for i in final_items if int(i["sets"]) > 0]
         week_end = dt.date.fromisoformat(req["week_end"])
-        set_plan(con, req["patient_id"], new_plan, approved_by=pt_name,
-                 start_date=(week_end + dt.timedelta(days=1)).isoformat())
+        start = dt.date.today() if (req["kind"] or "weekly") == "first" else week_end + dt.timedelta(days=1)
+        set_plan(con, req["patient_id"], new_plan, approved_by=pt_name, start_date=start.isoformat())
     con.execute(
-        "UPDATE adjustment_requests SET status=?, final_json=?, pt_edited=?, pt_note=?, decided_at=?"
+        "UPDATE adjustment_requests SET status=?, final_json=?, pt_edited=?, pt_note=?, decided_at=?, decisions_json=?"
         " WHERE request_id=?",
-        ("approved" if approve else "rejected", json.dumps(final_items), edited, pt_note, now, request_id),
+        ("approved" if approve else "rejected", json.dumps(final_items), edited, pt_note, now,
+         json.dumps(decisions) if decisions else None, request_id),
     )
     con.commit()
-    return {"request_id": request_id, "status": "approved" if approve else "rejected", "pt_edited": bool(edited)}
+    return {"request_id": request_id, "status": "approved" if approve else "rejected", "pt_edited": bool(edited),
+            "plan": current_plan(con, req["patient_id"])}
 
 
 # ---------- Intake (tab 1) ----------
@@ -657,7 +929,8 @@ def latest_request(con, patient_id, status=None):
     r = con.execute(sql + " ORDER BY request_id DESC LIMIT 1", args).fetchone()
     if r is None:
         return None
-    return {"request_id": r["request_id"], "week_end": r["week_end"], "status": r["status"],
+    return {"request_id": r["request_id"], "kind": r["kind"] or "weekly", "week_end": r["week_end"], "status": r["status"],
+            "decisions": json.loads(r["decisions_json"]) if r["decisions_json"] else None,
             "draft_source": r["draft_source"], "draft": json.loads(r["draft_json"]),
             "summary": json.loads(r["summary_json"]),
             "final": json.loads(r["final_json"]) if r["final_json"] else None,
