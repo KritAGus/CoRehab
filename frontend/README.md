@@ -9,3 +9,6 @@ Plain HTML + JavaScript (no build step). Served by the backend at http://127.0.0
 Run the backend (`python backend/test_server.py`) and open http://127.0.0.1:8000. `patient-live.js` and `pt-live.js`
 connect the pages to the API (see `docs/API.md`); opened as plain files, the pages run as the original prototype.
 No API keys or plan rules in the front end.
+
+`detection-live.js` turns on the tablet camera on the setup and exercise screens: it counts reps, checks form and
+scores each rep (code in `frontend/detection/`, see `detection/README.md`). Add `?camera=0` to use the demo timer.

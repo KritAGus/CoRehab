@@ -1,0 +1,11 @@
+clip,exercise,view,rep,start_video_s,end_video_s,duration_s,rise_s,return_s,peak,excursion,lift,pelvis_roll,app_flags,pt_label
+side_lying_abduction_P-anon-01_202611200130,side_lying_abduction,front,1,1.5,4.19,2.693,0.962,0.766,43.859,32.913,43.859,10.291,,correct
+side_lying_abduction_P-anon-01_202611200130,side_lying_abduction,front,2,8.35,11.66,3.311,1.504,1.085,52.849,40.239,52.849,10.494,too_high,wrong: too high
+side_lying_abduction_P-anon-01_202611200130,side_lying_abduction,front,3,15.95,17.72,1.779,0.893,0.578,33.407,22.626,33.407,8.329,,correct
+side_lying_abduction_P-anon-01_202611200130,side_lying_abduction,front,4,21.93,23.96,2.037,0.956,0.664,33.498,22.174,33.498,8.556,,correct
+side_lying_abduction_P-anon-01_202611200130,side_lying_abduction,front,5,28.75,31.02,2.274,1.26,0.506,30.615,19.843,30.615,7.935,,correct
+side_lying_abduction_P-anon-01_202611200130,side_lying_abduction,front,6,35.19,37.24,2.051,0.941,0.524,33.89,21.285,33.89,9.377,,correct
+side_lying_abduction_P-anon-01_202611200130,side_lying_abduction,front,7,41.26,43.48,2.214,1.038,0.638,35.987,25.686,35.987,8.626,,correct
+side_lying_abduction_P-anon-01_202611200130,side_lying_abduction,front,8,47.63,49.58,1.959,1.022,0.596,42.277,30.592,42.277,9.257,,correct
+side_lying_abduction_P-anon-01_202611200130,side_lying_abduction,front,9,53.61,55.72,2.114,0.909,0.791,40.555,29.081,40.555,9.053,,correct
+side_lying_abduction_P-anon-01_202611200130,side_lying_abduction,front,10,59.79,62.38,2.586,1.032,0.895,45.548,33.997,45.548,8.078,too_high,wrong: too high

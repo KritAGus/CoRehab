@@ -1,0 +1,13 @@
+clip,exercise,view,rep,start_video_s,end_video_s,duration_s,rise_s,return_s,peak,excursion,knee_bend,thigh_forward,trunk_lean,app_flags,pt_label
+standing_knee_bend_P-anon-01_202611200102,standing_knee_bend,side,1,1.11,6.04,4.931,2.076,2.116,110.571,103.86,110.571,10.782,0.729,,correct
+standing_knee_bend_P-anon-01_202611200102,standing_knee_bend,side,2,7.59,11.67,4.071,1.532,1.899,102.57,92.432,102.57,8.32,0.534,,correct
+standing_knee_bend_P-anon-01_202611200102,standing_knee_bend,side,3,13.33,17.61,4.27,2.01,1.452,102.091,91.435,102.091,10.165,0.959,,correct
+standing_knee_bend_P-anon-01_202611200102,standing_knee_bend,side,4,19.14,23.09,3.945,1.504,1.546,96.902,84.186,96.902,11.25,0.634,,correct
+standing_knee_bend_P-anon-01_202611200102,standing_knee_bend,side,5,24.76,28.44,3.685,1.528,1.377,106.056,93.661,106.056,11.996,0.837,,correct
+standing_knee_bend_P-anon-01_202611200102,standing_knee_bend,side,6,30.26,33.33,3.079,1.083,1.051,107.348,94.952,107.348,11.646,1.738,,correct
+standing_knee_bend_P-anon-01_202611200102,standing_knee_bend,side,7,34.92,38.47,3.549,1.329,1.26,109.948,97.552,109.948,11.408,1.325,,correct
+standing_knee_bend_P-anon-01_202611200102,standing_knee_bend,side,8,40.37,44.06,3.69,1.482,1.129,104.993,92.597,104.993,9.77,1.095,,correct
+standing_knee_bend_P-anon-01_202611200102,standing_knee_bend,side,9,46.01,49.24,3.23,1.541,0.884,98.929,86.533,98.929,10.008,1.853,,correct
+standing_knee_bend_P-anon-01_202611200102,standing_knee_bend,side,10,50.96,54.2,3.237,1.328,0.736,102.528,93.461,102.528,9.807,0.893,,correct
+standing_knee_bend_P-anon-01_202611200102,standing_knee_bend,side,11,55.46,59.49,4.024,1.621,1.21,124.527,110.866,124.527,6.525,5.501,trunk_leans,wrong: trunk leans
+standing_knee_bend_P-anon-01_202611200102,standing_knee_bend,side,12,60.67,63.71,3.038,1.186,1.199,118.968,100.104,118.968,9.754,6.478,trunk_leans,wrong: trunk leans

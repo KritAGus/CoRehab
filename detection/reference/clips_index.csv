@@ -1,0 +1,15 @@
+clip,exercise,view,from_original,start_s,end_s,audio,reps,pt_flags,note
+glute_bridge_P-anon-01_202611200127,glute_bridge,side,glute_bridge_P-anon-01_202611200127.mp4,0,94.5,False,12,,app view was Front; JSON corrected to side
+heel_slide_P-anon-01_202611200035_a,heel_slide,side,heel_slide_P-anon-01_202611200035.mp4,0,58.15,True,4,,reps 1-4; tracked with Lite
+heel_slide_P-anon-01_202611200035_b,heel_slide,side,heel_slide_P-anon-01_202611200035.mp4,98.71,150.69,True,4,,reps 10-13; PT moving the leg (58-99 s) removed
+heel_slide_P-anon-02_202611200040,heel_slide,side,heel_slide_P-anon-02_202611200040.mp4,0,83.22,True,10,,
+mini_squat_P-anon-01_202611200119,mini_squat,side,mini_squat_P-anon-01_202611200119.mp4,0.0,45.17,False,11,,walk to the phone at the end removed
+seated_knee_extension_P-anon-01_202611200107,seated_knee_extension,side,seated_knee_extension_P-anon-01_202611200107.mp4,0,58.2,False,10,,foot near bottom edge; angle shaky when straight
+seated_knee_extension_P-anon-02_202611200111,seated_knee_extension,side,seated_knee_extension_P-anon-02_202611200111.mp4,0,65.3,False,11,,
+side_lying_abduction_P-anon-01_202611200130,side_lying_abduction,front,side_lying_abduction_P-anon-01_202611200130.mp4,0.57,64.45,False,10,reps 2 and 10 too high,
+sit_to_stand_P-anon-01_202611200115,sit_to_stand,side,sit_to_stand_P-anon-01_202611200115.mp4,0.14,67.38,False,11,,
+sitting_knee_bend_P-anon-01_202611200055,sitting_knee_bend,side,sitting_knee_bend_P-anon-01_202611200055.mp4,1.93,64.92,True,12,,half rep at the start removed
+standing_knee_bend_P-anon-01_202611200102,standing_knee_bend,side,standing_knee_bend_P-anon-01_202611200102.mp4,0,65.21,True,12,reps 11-12 trunk leans,
+step_up_P-anon-01_202611200124,step_up,side,step_up_P-anon-01_202611200124.mp4,0,52.34,False,11,,app menu was Glute bridge; JSON corrected to step_up
+step_up_P-anon-01_202611200134,step_up,side,step_up_P-anon-01_202611200134.mp4,0.3,60.57,True,10,,no app JSON; tracked with YOLO11l (no heel/toe points)
+straight_leg_raise_P-anon-02_202611200049,straight_leg_raise,side,straight_leg_raise_P-anon-02_202611200049.mp4,0.23,91.53,True,12,,

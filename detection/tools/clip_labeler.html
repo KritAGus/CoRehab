@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rehab Clip Labeler</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+/* VOICE: calm, clinical work tool for a PT and students labelling takes.
+   IDEA: a film slate: every take gets a slate (exercise, leg, correct/wrong, take no.).
+   PICTURE: the video itself, with a timeline strip of marked takes under it.
+   COLOUR and TYPE: aluminium ground, black ink, green = correct, red = wrong. Geist.
+   LAYOUT: video + timeline left, slate form right; takes table below; stacks under 900px. */
+:root{color-scheme:light dark;--bg:light-dark(#e9eaec,#141517);--panel:light-dark(#fff,#1d1f22);--ink:light-dark(#141517,#eceef0);--mute:light-dark(#5b6068,#9aa0a8);--line:light-dark(#cfd2d6,#30343a);--ok:light-dark(#137a43,#3ccf7e);--bad:light-dark(#c62828,#ff6b6b);--acc:#ff4f00}
+:root[data-theme=light]{color-scheme:light}:root[data-theme=dark]{color-scheme:dark}
+*{box-sizing:border-box;min-width:0}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 Geist,system-ui,sans-serif;overflow-x:clip}
+.band{padding:clamp(16px,3vw,32px) max(4vw,14px);max-width:1340px;margin:0 auto}
+h1{font-size:clamp(26px,3.4vw,36px);line-height:1.05;margin:0 0 4px;font-weight:700;text-wrap:balance}
+.sub{color:var(--mute);margin:0 0 18px;max-width:70ch}
+.grid{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);gap:18px;align-items:start}
+@media(max-width:900px){.grid{grid-template-columns:minmax(0,1fr)}}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px}
+.drop{position:relative;background:#000;border-radius:8px;aspect-ratio:16/9;display:grid;place-items:center;overflow:hidden}
+.drop video{width:100%;height:100%;object-fit:contain;display:block}
+.drop .empty{color:#c9cdd2;text-align:center;padding:20px}
+.drop.over{outline:3px dashed var(--acc);outline-offset:-6px}
+.tl{position:relative;height:46px;margin-top:10px;background:light-dark(#f1f2f4,#26292d);border-radius:6px;cursor:pointer;touch-action:none}
+.tl .seg{position:absolute;top:6px;bottom:6px;border-radius:4px;opacity:.85}
+.tl .seg.ok{background:var(--ok)}.tl .seg.bad{background:var(--bad)}
+.tl .mark{position:absolute;top:0;bottom:0;background:light-dark(rgba(255,79,0,.18),rgba(255,79,0,.28));border-inline:2px solid var(--acc)}
+.tl .head{position:absolute;top:-3px;bottom:-3px;width:2px;background:var(--ink)}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:10px}
+.time{font-variant-numeric:tabular-nums;font-weight:500;white-space:nowrap}
+button,select,input,textarea{font:inherit;font-size:16px;color:var(--ink)}
+button{min-height:44px;padding:0 14px;border-radius:8px;border:1px solid var(--line);background:var(--panel);cursor:pointer;white-space:nowrap}
+button:hover{border-color:var(--mute)}
+button.pri{background:var(--ink);color:var(--panel);border-color:var(--ink);font-weight:500}
+button.in{border-color:var(--acc);color:var(--acc);font-weight:500}
+button:focus-visible,select:focus-visible,input:focus-visible,textarea:focus-visible{outline:3px solid var(--acc);outline-offset:2px}
+label{display:block;font-size:14px;color:var(--mute);margin:10px 0 4px}
+select,input,textarea{width:100%;min-height:44px;padding:8px 10px;border-radius:8px;border:1px solid var(--line);background:light-dark(#fff,#16181b)}
+.two{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px}
+.seg-toggle{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.seg-toggle button[aria-pressed=true].c{background:var(--ok);border-color:var(--ok);color:#fff}
+.seg-toggle button[aria-pressed=true].w{background:var(--bad);border-color:var(--bad);color:#fff}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chips label{display:inline-flex;gap:6px;align-items:center;margin:0;padding:6px 10px;border:1px solid var(--line);border-radius:999px;color:var(--ink);font-size:14px;min-height:36px;cursor:pointer}
+.chips input{width:auto;min-height:0}
+.slate{font-size:13px;color:var(--mute);margin-top:10px;overflow-wrap:anywhere}
+.keys{font-size:13px;color:var(--mute);margin-top:8px}
+kbd{font:12px Geist,monospace;border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:0 5px}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th,td{text-align:start;padding:8px 6px;border-bottom:1px solid var(--line);vertical-align:middle}
+th{color:var(--mute);font-weight:500}
+td.n{text-align:end;font-variant-numeric:tabular-nums;white-space:nowrap}
+.pill{display:inline-block;padding:2px 8px;border-radius:999px;color:#fff;font-size:12px;font-weight:500}
+.pill.ok{background:var(--ok)}.pill.bad{background:var(--bad)}
+td button{min-height:36px;padding:0 10px;font-size:14px}
+textarea{min-height:140px;font:13px/1.4 ui-monospace,monospace}
+.msg{font-size:14px;color:var(--ok);min-height:20px}
+.warn{color:var(--bad)}
+h2{font-size:20px;margin:0 0 8px}
+@media(max-width:600px){table{font-size:13px}.stack thead{display:none}.stack tr{display:grid;padding-block:10px}.stack td{display:flow-root;border:0;padding:3px 0;padding-inline-start:7em;text-align:start}.stack td::before{content:attr(data-l);float:inline-start;width:6.5em;margin-inline-start:-7em;color:var(--mute)}.stack td:empty{display:none}}
+</style>
+<script>new MutationObserver(()=>{for(const c of document.querySelectorAll('.stack td:not([data-l])')){let i=0,p=c;while(p=p.previousElementSibling)i+=p.colSpan;c.dataset.l=c.closest('table').rows[0].cells[i]?.textContent||''}}).observe(document,{childList:true,subtree:true})</script>
+</head>
+<body>
+<div class="band">
+  <h1>Rehab clip labeler</h1>
+  <p class="sub">Open a long recording, mark where each take starts and ends, fill in its slate, and add it. When you're done, copy the CSV for the cutting script. The video stays on this device: nothing is uploaded.</p>
+
+  <div class="grid">
+    <div class="card">
+      <div class="drop" id="drop">
+        <div class="empty" id="empty"><p>Drop a video here or</p><button class="pri" id="pick">Open video</button><input type="file" id="file" accept="video/*" hidden></div>
+        <video id="vid" playsinline hidden></video>
+      </div>
+      <div class="tl" id="tl" aria-label="Timeline: click to jump"></div>
+      <div class="row">
+        <button id="back5" aria-label="Back 5 seconds">−5 s</button>
+        <button id="back" aria-label="Back one tenth of a second">−0.1</button>
+        <button class="pri" id="play">Play</button>
+        <button id="fwd" aria-label="Forward one tenth of a second">+0.1</button>
+        <button id="fwd5" aria-label="Forward 5 seconds">+5 s</button>
+        <select id="rate" style="width:auto" aria-label="Playback speed"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option><option value="4">4×</option></select>
+        <span class="time" id="now">0:00.0 / 0:00.0</span>
+      </div>
+      <div class="row">
+        <button class="in" id="setIn">Start here <kbd>I</kbd></button>
+        <button class="in" id="setOut">End here <kbd>O</kbd></button>
+        <span class="time" id="mark">Start –, end –</span>
+      </div>
+      <div class="keys"><kbd>Space</kbd> play/pause · <kbd>←</kbd><kbd>→</kbd> 1 s · <kbd>,</kbd><kbd>.</kbd> 0.1 s · <kbd>Enter</kbd> add take. Leave 1–2 s of stillness inside each take: the tracker uses it as the starting position.</div>
+      <div class="keys" id="vname"></div>
+    </div>
+
+    <form class="card" id="slate" autocomplete="off">
+      <h2>Slate</h2>
+      <label for="ex">Exercise</label><select id="ex"></select>
+      <div class="two">
+        <div><label for="view">Camera view</label><select id="view"></select></div>
+        <div><label for="leg">Leg doing it</label><select id="leg"><option value="left">Left</option><option value="right">Right</option><option value="both">Both</option></select></div>
+      </div>
+      <label>Form</label>
+      <div class="seg-toggle"><button type="button" class="c" id="fc" aria-pressed="true">Correct</button><button type="button" class="w" id="fw" aria-pressed="false">Wrong</button></div>
+      <div id="errBox" hidden><label>Which errors (pick all shown)</label><div class="chips" id="errs"></div></div>
+      <div class="two">
+        <div><label for="dev">Device</label><select id="dev"><option>iphone</option><option>ipad</option><option>laptop</option><option>other</option></select></div>
+        <div><label for="cam">Camera</label><select id="cam"><option value="front">Front</option><option value="rear">Rear</option></select></div>
+      </div>
+      <div class="two">
+        <div><label for="who">Person ID</label><input id="who" placeholder="e.g. P01"></div>
+        <div><label for="take">Take no.</label><input id="take" type="number" min="1" value="1" inputmode="numeric"></div>
+      </div>
+      <div class="two">
+        <div><label for="pt">PT initials (approved)</label><input id="pt" placeholder="e.g. JS"></div>
+        <div><label for="note">Note</label><input id="note" placeholder="optional"></div>
+      </div>
+      <div class="slate" id="fname"></div>
+      <div class="row"><button class="pri" type="submit" id="add">Add take <kbd>Enter</kbd></button><button type="button" id="cancelEdit" hidden>Cancel edit</button></div>
+      <div class="msg" id="msg" role="status"></div>
+    </form>
+  </div>
+</div>
+
+<div class="band" style="padding-top:0">
+  <div class="card">
+    <h2 id="cnt">Takes</h2>
+    <div class="scroll"><table class="stack" id="tbl"><thead><tr><th>Clip name</th><th>Form</th><th>Video</th><th>Start</th><th>End</th><th>Length</th><th></th></tr></thead><tbody></tbody></table></div>
+    <p class="keys" id="none">No takes yet. Mark a start and an end on the video, then add the take.</p>
+    <h2 style="margin-top:20px">Export</h2>
+    <div class="row" style="margin-top:0"><button class="pri" id="copyCsv">Copy CSV</button><button id="copyJson">Copy JSON</button><button id="clear">Clear all</button></div>
+    <label for="out">segments.csv (save this as a file next to your videos, then run cut_clips.py)</label>
+    <textarea id="out" readonly></textarea>
+    <label for="imp">Continue from an earlier CSV: paste it here</label>
+    <textarea id="imp" style="min-height:70px" placeholder="video,clip,exercise,..."></textarea>
+    <div class="row"><button id="doImp">Load pasted CSV</button></div>
+  </div>
+</div>
+
+<script>
+{
+const EX = {"heel_slide":{"label":"Heel slide","views":{"side":["hip_lifts","too_fast","partial"]}},"straight_leg_raise":{"label":"Straight leg raise","views":{"side":["knee_bends","back_arches","too_high"]}},"sitting_knee_bend":{"label":"Sitting knee bend","views":{"side":["slides_forward"]}},"standing_knee_bend":{"label":"Standing knee bend","views":{"side":["thigh_swings","trunk_leans"]}},"seated_knee_extension":{"label":"Seated knee extension","views":{"side":["not_straight","kicks_fast","leans_back"]}},"sit_to_stand":{"label":"Sit-to-stand","views":{"side":["pushes_hands","leans_far"],"front":["weight_shift"]}},"mini_squat":{"label":"Mini squat","views":{"side":["too_deep","trunk_leans"],"front":["knee_caves"]}},"step_up":{"label":"Step-up","views":{"side":[],"front":["hip_drops","knee_caves"]}},"glute_bridge":{"label":"Glute bridge","views":{"side":["arches","partial"],"front":["pelvis_tilts"]}},"side_lying_abduction":{"label":"Side-lying hip abduction","views":{"front":["hip_rolls","too_high"]}}};
+const COLS = ["video","clip","exercise","view","leg","form","errors","device","camera","person","take","pt_approved_by","note","start_s","end_s"];
+const $ = (id) => document.getElementById(id);
+const vid = $("vid"), tl = $("tl");
+let takes = [], inT = null, outT = null, form = "correct", editIdx = -1, vName = "";
+
+const fmt = (s) => { if (!Number.isFinite(s)) return "–"; const m = Math.floor(s / 60); return `${m}:${(s - m * 60).toFixed(1).padStart(4, "0")}`; };
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const slug = (s) => String(s || "").trim().replace(/[^A-Za-z0-9-]+/g, "-").replace(/^-|-$/g, "");
+const say = (t, bad) => { $("msg").textContent = t; $("msg").classList.toggle("warn", !!bad); };
+
+$("ex").innerHTML = Object.entries(EX).map(([k, e]) => `<option value="${k}">${e.label}</option>`).join("");
+function fillViews() {
+  const v = Object.keys(EX[$("ex").value].views);
+  $("view").innerHTML = v.map((x) => `<option value="${x}">${x === "side" ? "Side" : "Front"}</option>`).join("");
+  fillErrs();
+}
+function fillErrs(sel = []) {
+  const list = EX[$("ex").value].views[$("view").value] || [];
+  $("errs").innerHTML = list.map((id) => `<label><input type="checkbox" value="${id}"${sel.includes(id) ? " checked" : ""}>${id.replace(/_/g, " ")}</label>`).join("")
+    + `<label><input type="checkbox" value="other"${sel.includes("other") ? " checked" : ""}>other (say in note)</label>`;
+  $("errBox").hidden = form !== "wrong";
+  updName();
+}
+function setForm(f) { form = f; $("fc").setAttribute("aria-pressed", f === "correct"); $("fw").setAttribute("aria-pressed", f === "wrong"); $("errBox").hidden = f !== "wrong"; updName(); }
+const errsSel = () => [...$("errs").querySelectorAll("input:checked")].map((x) => x.value);
+function slateNow() {
+  const errors = form === "wrong" ? errsSel() : [];
+  const s = { video: vName, exercise: $("ex").value, view: $("view").value, leg: $("leg").value, form, errors: errors.join("|"),
+    device: $("dev").value, camera: $("cam").value, person: slug($("who").value) || "anon", take: Math.max(1, Number($("take").value) || 1),
+    pt_approved_by: $("pt").value.trim(), note: $("note").value.trim() };
+  const lab = form === "correct" ? "correct" : "wrong-" + (errors.length ? errors.join("+") : "unspecified");
+  s.clip = `${s.exercise}_${s.view}_${s.leg}_${lab}_${s.person}_${s.device}-${s.camera}_t${s.take}`;
+  return s;
+}
+function updName() { $("fname").textContent = "Clip name: " + slateNow().clip + ".mp4"; }
+
+function load(f) {
+  if (!f) return;
+  vName = f.name; vid.src = URL.createObjectURL(f); vid.hidden = false; $("empty").hidden = true;
+  inT = outT = null; $("vname").textContent = "Video: " + f.name; showMark(); draw(); updName();
+}
+$("pick").onclick = () => $("file").click();
+$("file").onchange = (e) => load(e.target.files[0]);
+const drop = $("drop");
+drop.ondragover = (e) => { e.preventDefault(); drop.classList.add("over"); };
+drop.ondragleave = () => drop.classList.remove("over");
+drop.ondrop = (e) => { e.preventDefault(); drop.classList.remove("over"); load(e.dataTransfer.files[0]); };
+$("vname").ondblclick = () => $("file").click();
+
+const seek = (d) => { if (vid.duration) vid.currentTime = Math.min(vid.duration, Math.max(0, vid.currentTime + d)); };
+$("play").onclick = () => { if (!vid.src) return; vid.paused ? vid.play().catch(() => {}) : vid.pause(); };
+vid.onplay = vid.onpause = () => { $("play").textContent = vid.paused ? "Play" : "Pause"; };
+$("back5").onclick = () => seek(-5); $("fwd5").onclick = () => seek(5); $("back").onclick = () => seek(-0.1); $("fwd").onclick = () => seek(0.1);
+$("rate").onchange = (e) => { vid.playbackRate = Number(e.target.value); };
+vid.ontimeupdate = () => { $("now").textContent = `${fmt(vid.currentTime)} / ${fmt(vid.duration)}`; draw(); };
+vid.onloadedmetadata = vid.ontimeupdate;
+function showMark() { $("mark").textContent = `Start ${fmt(inT)}, end ${fmt(outT)}` + (Number.isFinite(inT) && Number.isFinite(outT) ? ` · ${(outT - inT).toFixed(1)} s` : ""); }
+$("setIn").onclick = () => { if (!vid.src) return; inT = vid.currentTime; if (outT != null && outT <= inT) outT = null; showMark(); draw(); };
+$("setOut").onclick = () => { if (!vid.src) return; outT = vid.currentTime; if (inT != null && inT >= outT) inT = null; showMark(); draw(); };
+
+function draw() {
+  const D = vid.duration;
+  if (!D) { tl.innerHTML = ""; return; }
+  const pct = (t) => (100 * t / D).toFixed(3) + "%";
+  const segs = takes.filter((s) => s.video === vName).map((s) => `<div class="seg ${s.form === "correct" ? "ok" : "bad"}" style="left:${pct(s.start_s)};width:${pct(s.end_s - s.start_s)}" title="${esc(s.clip)}"></div>`).join("");
+  const m = inT != null ? `<div class="mark" style="left:${pct(inT)};width:${pct((outT ?? vid.currentTime) - inT > 0 ? (outT ?? vid.currentTime) - inT : 0)}"></div>` : "";
+  tl.innerHTML = segs + m + `<div class="head" style="left:${pct(vid.currentTime)}"></div>`;
+}
+tl.onpointerdown = (e) => { if (!vid.duration) return; const r = tl.getBoundingClientRect(); vid.currentTime = vid.duration * Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)); };
+
+$("ex").onchange = fillViews;
+$("view").onchange = () => fillErrs();
+$("errs").onchange = updName;
+$("fc").onclick = () => setForm("correct"); $("fw").onclick = () => setForm("wrong");
+for (const id of ["leg", "dev", "cam", "who", "take", "pt", "note"]) $(id).addEventListener("input", updName);
+
+$("slate").onsubmit = (e) => {
+  e.preventDefault();
+  if (!vName) return say("Open a video first.", true);
+  if (!(Number.isFinite(inT) && Number.isFinite(outT) && outT > inT)) return say("Mark a start and an end first.", true);
+  if (outT - inT < 2) return say("That take is under 2 seconds. Check the start and end.", true);
+  const s = { ...slateNow(), start_s: +inT.toFixed(2), end_s: +outT.toFixed(2) };
+  if (form === "correct" && !s.pt_approved_by) say("Added. Tip: add the PT's initials so correct takes count as approved.");
+  else say(editIdx >= 0 ? "Take updated." : "Take added.");
+  let clash = takes.findIndex((t, i) => t.clip === s.clip && i !== editIdx);
+  while (clash >= 0) { s.take += 1; const n = slateNow(); s.clip = n.clip.replace(/_t\d+$/, "_t" + s.take); clash = takes.findIndex((t, i) => t.clip === s.clip && i !== editIdx); }
+  if (editIdx >= 0) takes[editIdx] = s; else takes.push(s);
+  editIdx = -1; $("cancelEdit").hidden = true; $("add").firstChild.textContent = "Add take ";
+  $("take").value = s.take + 1; inT = outT = null; showMark(); render();
+};
+$("cancelEdit").onclick = () => { editIdx = -1; $("cancelEdit").hidden = true; $("add").firstChild.textContent = "Add take "; say(""); };
+
+function render() {
+  $("tbl").tBodies[0].innerHTML = takes.map((s, i) => `<tr><td style="overflow-wrap:anywhere">${esc(s.clip)}${s.note ? `<br><span class="keys">${esc(s.note)}</span>` : ""}</td>
+    <td><span class="pill ${s.form === "correct" ? "ok" : "bad"}">${s.form}</span>${s.pt_approved_by ? ` <span class="keys">PT ${esc(s.pt_approved_by)}</span>` : ""}</td>
+    <td style="overflow-wrap:anywhere">${esc(s.video)}</td><td class="n">${fmt(s.start_s)}</td><td class="n">${fmt(s.end_s)}</td><td class="n">${(s.end_s - s.start_s).toFixed(1)} s</td>
+    <td><button data-go="${i}">Play</button> <button data-ed="${i}">Edit</button> <button data-del="${i}">Delete</button></td></tr>`).join("");
+  $("none").hidden = takes.length > 0;
+  $("cnt").textContent = `Takes (${takes.length}: ${takes.filter((t) => t.form === "correct").length} correct, ${takes.filter((t) => t.form === "wrong").length} wrong)`;
+  $("out").value = toCsv();
+  try { localStorage.setItem("rehabLabelerTakes", JSON.stringify(takes)); } catch (e) {}
+  draw();
+}
+$("tbl").onclick = (e) => {
+  const b = e.target.closest("button"); if (!b) return;
+  const i = Number(b.dataset.go ?? b.dataset.ed ?? b.dataset.del), s = takes[i];
+  if (b.dataset.del != null) { takes.splice(i, 1); render(); return say("Take deleted."); }
+  if (s.video !== vName) return say(`That take is in ${s.video}. Open that video to ${b.dataset.go != null ? "play" : "edit"} it.`, true);
+  if (b.dataset.go != null) { vid.currentTime = s.start_s; vid.play().catch(() => {}); return; }
+  editIdx = i; inT = s.start_s; outT = s.end_s; showMark();
+  $("ex").value = s.exercise; fillViews(); $("view").value = s.view; setForm(s.form); fillErrs(s.errors ? s.errors.split("|") : []);
+  $("leg").value = s.leg; $("dev").value = s.device; $("cam").value = s.camera; $("who").value = s.person; $("take").value = s.take;
+  $("pt").value = s.pt_approved_by; $("note").value = s.note; updName();
+  $("cancelEdit").hidden = false; $("add").firstChild.textContent = "Save take "; vid.currentTime = s.start_s;
+  say("Editing: change the marks or slate, then save.");
+};
+
+const cell = (v) => { const s = String(v ?? ""); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+const toCsv = () => [COLS.join(","), ...takes.map((s) => COLS.map((c) => cell(s[c])).join(","))].join("\n");
+function parseCsv(txt) {
+  const rows = []; let row = [], f = "", q = false;
+  for (let i = 0; i < txt.length; i++) {
+    const c = txt[i];
+    if (q) { if (c === '"' && txt[i + 1] === '"') { f += '"'; i++; } else if (c === '"') q = false; else f += c; }
+    else if (c === '"') q = true; else if (c === ",") { row.push(f); f = ""; } else if (c === "\n" || c === "\r") { if (c === "\r" && txt[i + 1] === "\n") i++; row.push(f); rows.push(row); row = []; f = ""; }
+    else f += c;
+  }
+  if (f || row.length) { row.push(f); rows.push(row); }
+  const [h, ...rest] = rows.filter((r) => r.some((x) => x.trim()));
+  return rest.map((r) => Object.fromEntries(h.map((k, i) => [k.trim(), r[i] ?? ""])));
+}
+async function copy(text, what) {
+  try { await navigator.clipboard.writeText(text); say(`${what} copied.`); }
+  catch (e) { $("out").value = text; $("out").select(); say("Couldn't copy automatically: the text is selected below, copy it by hand.", true); }
+}
+$("copyCsv").onclick = () => copy(toCsv(), "CSV");
+$("copyJson").onclick = () => copy(JSON.stringify(takes, null, 1), "JSON");
+$("clear").onclick = () => {
+  if ($("clear").dataset.sure) { takes = []; delete $("clear").dataset.sure; $("clear").textContent = "Clear all"; render(); return say("All takes cleared."); }
+  $("clear").dataset.sure = "1"; $("clear").textContent = "Tap again to clear all";
+  setTimeout(() => { delete $("clear").dataset.sure; $("clear").textContent = "Clear all"; }, 3000);
+};
+$("doImp").onclick = () => {
+  try {
+    const rows = parseCsv($("imp").value).map((r) => ({ ...r, take: Number(r.take) || 1, start_s: Number(r.start_s), end_s: Number(r.end_s) }))
+      .filter((r) => r.clip && Number.isFinite(r.start_s) && Number.isFinite(r.end_s));
+    if (!rows.length) return say("No takes found in the pasted text.", true);
+    const known = new Set(takes.map((t) => t.clip));
+    const add = rows.filter((r) => !known.has(r.clip));
+    takes.push(...add); $("imp").value = ""; render(); say(`Loaded ${add.length} takes${rows.length > add.length ? ` (${rows.length - add.length} already here)` : ""}.`);
+  } catch (e) { say("Couldn't read that CSV.", true); }
+};
+
+document.addEventListener("keydown", (e) => {
+  const typing = /INPUT|TEXTAREA|SELECT/.test(e.target.tagName);
+  if (e.key === "Enter" && !(e.target.tagName === "TEXTAREA")) { if (e.target.tagName !== "BUTTON") { e.preventDefault(); $("slate").requestSubmit(); } return; }
+  if (typing || !vid.src) return;
+  const k = e.key.toLowerCase();
+  if (k === " ") { e.preventDefault(); $("play").click(); }
+  else if (k === "i") $("setIn").click(); else if (k === "o") $("setOut").click();
+  else if (e.key === "ArrowLeft") { e.preventDefault(); seek(-1); } else if (e.key === "ArrowRight") { e.preventDefault(); seek(1); }
+  else if (k === ",") seek(-0.1); else if (k === ".") seek(0.1);
+});
+
+try { const saved = JSON.parse(localStorage.getItem("rehabLabelerTakes") || "[]"); if (Array.isArray(saved)) takes = saved; } catch (e) {}
+fillViews(); setForm("correct"); render();
+}
+</script>
+</body>
+</html>

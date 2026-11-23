@@ -151,6 +151,8 @@
     const body = { exercise_id: e.id, sets_done: Math.min(app.nsets(e), Math.ceil(reps / Math.max(1, app.target(e))) || 0),
       reps_done: reps, feeling: feel, note: ((S.exNotes || {})[idx] || '').trim() || undefined };
     if (feel === 'too_hard' && S.painAfter != null) body.pain_after = S.painAfter;
+    const cam = window.CAM && window.CAM.resultFor(e.id, reps);   // camera form scores (detection-live.js)
+    if (cam) Object.assign(body, cam);
     CR.ck.then(id => id && call('/api/result', Object.assign({ checkin_id: id }, body))).catch(err => console.warn('result', err));
   }
 
