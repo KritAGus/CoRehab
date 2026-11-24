@@ -247,6 +247,51 @@ def log_call(con, pid, minutes, agreed="", date=None):
     return {"call_id": cur.lastrowid}
 
 
+def schedule(con, start, end, today=None):
+    """PT Schedule screen: visits between start and end (inclusive), calls to make, and call history."""
+    today = today or dt.date.today()
+    events = []
+    for r in con.execute("SELECT v.visit_id, v.patient_id, v.kind, v.status, v.date, v.time, v.place, v.reason, p.name, p.phone"
+                         " FROM visits v JOIN patients p USING(patient_id) WHERE v.date BETWEEN ? AND ? AND v.time IS NOT NULL"
+                         " ORDER BY v.date, v.time", (start, end)):
+        e = dict(r)
+        alert = con.execute("SELECT reason FROM alerts WHERE patient_id=? AND COALESCE(status,'open')='open' ORDER BY date DESC LIMIT 1",
+                            (e["patient_id"],)).fetchone()
+        e["type"] = "Phone" if e["kind"] == "phone" else "In clinic"
+        e["k"] = "new" if e["kind"] == "first" else "call" if e["kind"] == "phone" else "urg" if alert else "clin"
+        e["minutes"] = 60 if e["kind"] == "first" else 45
+        last = con.execute("SELECT date, pain_today, pain_end FROM checkins WHERE patient_id=? AND action!='rest' ORDER BY date DESC LIMIT 1",
+                           (e["patient_id"],)).fetchone()
+        prep = []
+        if alert:
+            prep.append(f"Open alert: {alert['reason']}.")
+        if last:
+            ld = dt.date.fromisoformat(last["date"])
+            prep.append(f"Last session {ld.strftime('%a')}, {ld.strftime('%b')} {ld.day}: pain {last['pain_today']} before, {last['pain_end'] if last['pain_end'] is not None else '–'} after.")
+        if e["kind"] == "first":
+            prep.append("Intake ready." if rn.latest_intake(con, e["patient_id"]) else "No intake yet.")
+        e["prep"] = " ".join(prep) or "No sessions yet."
+        events.append(e)
+    month_start = today.replace(day=1).isoformat()
+    month_end = ((today.replace(day=28) + dt.timedelta(days=4)).replace(day=1) - dt.timedelta(days=1))
+    to_call = []
+    for p in con.execute("SELECT patient_id, name, phone, COALESCE(status,'active') AS status FROM patients ORDER BY name"):
+        pid = p["patient_id"]
+        alerts = con.execute("SELECT tier, reason FROM alerts WHERE patient_id=? AND COALESCE(status,'open')='open' ORDER BY tier='urgent' DESC, date DESC",
+                             (pid,)).fetchall()
+        if alerts:
+            to_call.append({"patient_id": pid, "name": p["name"], "phone": p["phone"], "why": f"Alert follow-up: {alerts[0]['reason']}",
+                            "due": "Today", "k": "urg" if alerts[0]["tier"] == "urgent" else "rev"})
+        elif p["status"] == "active" and rn.current_plan(con, pid) and not con.execute(
+                "SELECT 1 FROM calls WHERE patient_id=? AND date>=?", (pid, month_start)).fetchone():
+            to_call.append({"patient_id": pid, "name": p["name"], "phone": p["phone"], "why": "Monthly call (remote monitoring)",
+                            "due": f"By {month_end.strftime('%b')} {month_end.day}", "k": "mut"})
+    to_call.sort(key=lambda c: {"urg": 0, "rev": 1}.get(c["k"], 2))
+    history = [dict(r) for r in con.execute("SELECT c.call_id, c.patient_id, c.date, c.minutes, c.agreed, p.name FROM calls c"
+                                            " JOIN patients p USING(patient_id) ORDER BY c.date DESC, c.call_id DESC LIMIT 30")]
+    return {"start": start, "end": end, "events": events, "calls_to_make": to_call, "call_history": history}
+
+
 def data_days(con, pid, today=None, days=30):
     """RTM: days with data in the last 30 days (a check-in counts as a data day)."""
     today = today or dt.date.today()
@@ -428,7 +473,17 @@ def home(con, pid, today=None):
     done_today = con.execute("SELECT 1 FROM checkins WHERE patient_id=? AND date=? AND action!='rest'",
                              (pid, today.isoformat())).fetchone() is not None
     rest_today = rn.WEEKDAYS[today.weekday()] in rn.rest_days(con, pid)
+    lf = latest_findings(con, pid)
+    f = (lf or {}).get("findings") or {}
+    visits = [dict(r) for r in con.execute(
+        "SELECT visit_id, kind, date, time, place, reason FROM visits WHERE patient_id=? AND status='scheduled' AND date>=?"
+        " ORDER BY date, time", (pid, today.isoformat()))]
+    first = con.execute("SELECT visit_id, kind, status, date, time, place, reason FROM visits WHERE patient_id=? AND kind='first'"
+                        " ORDER BY date DESC LIMIT 1", (pid,)).fetchone()
     return {"patient_id": pid, "name": p["name"], "first_name": (p["name"] or "").split(" ")[0], "phase": phase,
+            "visits": visits, "first_visit": dict(first) if first else None,
+            "goals": f.get("goals_week6") or [], "precautions": f.get("precautions") or [],
+            "intake_date": intake["created_at"][:10] if intake and intake.get("created_at") else None,
             "clinic": CLINIC, "next_visit": next_visit(con, pid, today), "plan": plan, "plan_change": change,
             "rest_days": rn.rest_days(con, pid), "rest_today": rest_today, "done_today": done_today,
             "streak": streak(con, pid, today), "week_post_op": _week_post_op(p, today),

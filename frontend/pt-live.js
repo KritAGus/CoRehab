@@ -1,7 +1,7 @@
 /* Connects pt.html to the CoRehab API (docs/API.md).
    Replaces the prototype's scripted screens with screens built from server data, using the same styles:
    patient list, intake, clinic visit (autosaved findings), first-plan draft, weekly review, patient profile.
-   Messages and Schedule stay as the prototype (faked, per the alignment doc).
+   Messages and Schedule are live too (messages table; visits + calls).
    Opened without the server, the prototype runs on its built-in demo data. */
 (function () {
   const PTL = { live: false, cache: { profile: {}, request: {} }, dec: {}, filter: 'all', addOpen: false, note: '' };
@@ -40,6 +40,7 @@
     try {
       if (view === 'list' || view === 'msg') PTL.cache.list = await call('/api/patients');
       if (view === 'msg') await loadMsgs(pid || PTL.thread, true);
+      if (view === 'sched') await loadSched(true);
       if (['intake', 'visit', 'prof', 'review', 'plan'].includes(view)) PTL.cache.profile[PTL.pid] = await call(`/api/profile?patient_id=${PTL.pid}`);
       if (['review', 'plan'].includes(view)) {
         PTL.cache.request[PTL.pid] = (await call(`/api/request?patient_id=${PTL.pid}&status=pending`)).request;
@@ -186,7 +187,8 @@
       x.stopped_early ? `<li><b>${fmt(x.date)}, ended early:</b> ${esc(x.stop_reason || '')}</li>` : '',
       ...(x.bothered || []).map(b => `<li><b>${fmt(x.date)}:</b> ${esc(ex(b.exercise_id).n)} bothered: ${esc(b.reason)}${b.other ? ' (' + esc(b.other) + ')' : ''}</li>`),
       x.worry ? `<li><b>${fmt(x.date)}, worried:</b> ${esc([...(x.worry.symptoms || []), x.worry.other].filter(Boolean).join(', '))}</li>` : '',
-      ...x.exercises.filter(e => e.note).map(e => `<li><b>${fmt(x.date)} note:</b> "${esc(e.note)}"</li>`)]).filter(Boolean);
+      ...x.exercises.filter(e => e.note).map(e => `<li><b>${fmt(x.date)} note:</b> "${esc(e.note)}"</li>`),
+      x.note ? `<li><b>${fmt(x.date)}, after the session:</b> "${esc(x.note)}"</li>` : '']).filter(Boolean);
     const { rows, und, acc } = suggestions(req);
     return head(P.patient, 'list', `Week of ${fmt(s.week.start).slice(5)}`) + `<div class="grid2" style="margin-top:20px"><div>
       <div class="card pad"><h2>The week</h2><div class="painrow"><div class="pbox"><b>${s.days_checked_in - s.days_rest}</b><small> of ${s.planned_days}</small><span>sessions</span></div>
@@ -207,7 +209,7 @@
     if (!P) return errBox();
     const p = P.patient;
     const sess = P.sessions.slice(0, 14).map(x => `<tr><td>${fmt(x.date)}</td><td>${x.action === 'rest' ? '<span class="tag urg">Rested</span>' : x.stopped_early ? '<span class="tag rev">Ended early</span>' : '<span class="tag ok">Done</span>'}</td>
-      <td>${x.pain_before} → ${x.pain_end ?? '–'}</td><td>${x.exercises.map(e => `${esc(ex(e.exercise_id).n)}${e.feeling ? ' (' + FEEL[e.feeling] + ')' : ''}`).join(', ') || '–'}</td></tr>`).join('');
+      <td>${x.pain_before} → ${x.pain_end ?? '–'}</td><td>${x.exercises.map(e => `${esc(ex(e.exercise_id).n)}${e.feeling ? ' (' + FEEL[e.feeling] + ')' : ''}`).join(', ') || '–'}${x.note ? `<div class="hint" style="margin:4px 0 0">"${esc(x.note)}"</div>` : ''}</td></tr>`).join('');
     const pain = P.pain_by_week.map(w => `<div class="pbox"><b>${w.pain_after}</b><small>/10</small><span>wk of ${fmt(w.week_start).slice(5)}</span></div>`).join('');
     const alerts = P.alerts.filter(a => a.status !== 'closed').map(a => `<li><span class="tag ${a.tier === 'urgent' ? 'urg' : 'rev'}">${a.tier}</span> ${fmt(a.date)}: ${esc(a.reason)}</li>`).join('');
     const visits = P.visits.map(v => `<li>${fmt(v.date)} ${esc(v.time || '')} · ${esc(v.kind.replace('_', ' '))} · ${esc(v.status)}${v.reason ? ' · ' + esc(v.reason) : ''}</li>`).join('');
@@ -305,7 +307,71 @@
     document.querySelectorAll('.msgwrap, .tview').forEach(el => { el.scrollTop = 0; });
   }
 
-  PTL.views = { msg: msgView, list: listView, wlist: listView, intake: intakeView, visit: visitView, plan: planView, review: reviewView, prof: profView, lvdone: doneView, sent: doneView, wsent: doneView, kept: doneView };
+
+  // ---------- Schedule (visits from the database, calls to make, call history) ----------
+  const DWK = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'];
+  const iso = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  const monday = () => { const d = new Date(); d.setHours(12, 0, 0, 0); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return d; };
+  function schedRange() {
+    const S = A().S;
+    if (S.calV === 'month') {
+      const m0 = new Date(); m0.setDate(1); m0.setMonth(m0.getMonth() + (S.calOff || 0)); m0.setHours(12, 0, 0, 0);
+      const start = new Date(m0); start.setDate(1 - ((m0.getDay() + 6) % 7));
+      const end = new Date(start); end.setDate(start.getDate() + 41);
+      return { m0, start, end };
+    }
+    const start = monday(); start.setDate(start.getDate() + 7 * (S.calOff || 0));
+    const end = new Date(start); end.setDate(start.getDate() + 6);
+    return { start, end };
+  }
+  async function loadSched(force) {
+    const r = schedRange(), key = iso(r.start) + '|' + iso(r.end);
+    if (!force && PTL.cache.sched && PTL.cache.sched.key === key) return false;
+    const before = JSON.stringify(PTL.cache.sched || {});
+    PTL.cache.sched = { key, ...(await call(`/api/schedule?start=${iso(r.start)}&end=${iso(r.end)}`)) };
+    return JSON.stringify(PTL.cache.sched) !== before;
+  }
+  const hh = t => { const [h, m] = (t || '09:00').split(':').map(Number); return h + (m || 0) / 60; };
+  const fmtH = h => { const H = Math.floor(h), m = Math.round((h - H) * 60); return ((H % 12) || 12) + ':' + String(m).padStart(2, '0') + (H < 12 ? ' am' : ' pm'); };
+  const short = n => { const w = (n || '').split(' '); return w[0] + (w[1] ? ' ' + w[1][0] + '.' : ''); };
+  function schedView() {
+    const S = A().S, D = PTL.cache.sched, r = schedRange(), H0 = 8, H1 = 17;
+    if (!D || D.key !== iso(r.start) + '|' + iso(r.end)) loadSched().then(ch => ch && A().S.view === 'sched' && A().render()).catch(e => { PTL.err = e.message; A().render(); });
+    const evs = ((D && D.key === iso(r.start) + '|' + iso(r.end)) ? D.events : []).map(e => ({ ...e, st: Math.min(Math.max(hh(e.time), H0), H1 - 0.75) }));
+    const today = iso(new Date());
+    const dayDate = i => { const d = new Date(r.start); d.setDate(d.getDate() + i); return d; };
+    const cols = S.calV === 'day' ? [S.calDay || 0] : [0, 1, 2, 3, 4];
+    const pct = h => ((h - H0) / (H1 - H0) * 100).toFixed(3) + '%';
+    const sel = S.evSel != null ? evs[S.evSel] : null;
+    const range = S.calV === 'month' ? `${MON[r.m0.getMonth()]} ${r.m0.getFullYear()}`
+      : S.calV === 'day' ? (d => `${['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'][S.calDay || 0]}, ${MON[d.getMonth()]} ${d.getDate()}`)(dayDate(S.calDay || 0))
+      : (a => `${MON[a.getMonth()]} ${a.getDate()} to ${dayDate(4).getMonth() !== a.getMonth() ? MON[dayDate(4).getMonth()] + ' ' : ''}${dayDate(4).getDate()}`)(dayDate(0));
+    const bar = `<div class="calbar"><div class="calnav"><button class="btn sec" data-calnav="0">Today</button><button class="cnb" data-calnav="-1" aria-label="Previous">${I().back}</button><button class="cnb" data-calnav="1" aria-label="Next">${I().next}</button><b>${range}</b></div><div class="seg">${['day', 'week', 'month'].map(v => `<button data-calv="${v}" class="${(S.calV || 'week') === v ? 'on' : ''}">${v[0].toUpperCase() + v.slice(1)}</button>`).join('')}</div></div>`;
+    let cal;
+    if (S.calV === 'month') {
+      const cells = Array.from({ length: 42 }, (_, i) => dayDate(i));
+      cal = `<div class="mgrid">${['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(h => `<b>${h}</b>`).join('')}${cells.map(x => {
+        const k = iso(x), list = evs.filter(e => e.date === k);
+        const we = x.getDay() === 0 || x.getDay() === 6, dn = Math.round((x - monday()) / 864e5), wk = Math.floor(dn / 7), di = ((dn % 7) + 7) % 7;
+        return `<button class="mcell${x.getMonth() !== r.m0.getMonth() ? ' off' : ''}${we ? ' we' : ''}" ${we ? 'disabled' : `data-calpick="${di}" data-calwk="${wk}"`}><span class="mnum${k === today ? ' tdy' : ''}">${x.getDate()}</span>${list.map(e => `<i class="mev ${e.k}">${esc(short(e.name))}</i>`).join('')}</button>`; }).join('')}</div>`;
+    } else {
+      cal = `<div class="calhd" style="grid-template-columns:56px repeat(${cols.length},1fr)"><span></span>${cols.map(c => `<b>${DWK[c]} ${dayDate(c).getDate()}</b>`).join('')}</div>
+      <div class="calbody" style="grid-template-columns:56px repeat(${cols.length},minmax(0,1fr))"><div class="hrs">${Array.from({ length: H1 - H0 }, (_, i) => `<span style="top:${pct(H0 + i)}">${fmtH(H0 + i).replace(':00', '')}</span>`).join('')}</div>
+      ${cols.map((di, ci) => `<div class="dcol" style="grid-column:${ci + 2}">${evs.map((e, i) => e.date !== iso(dayDate(di)) ? '' : `<button class="cev ${e.k}${S.evSel === i ? ' on' : ''}" data-ev="${i}" style="top:${pct(e.st)};height:calc(${(Math.max(e.minutes, 40) / 60 / (H1 - H0) * 100).toFixed(3)}% - 4px)${e.status === 'done' ? ';opacity:.55' : ''}"><b>${esc(short(e.name))}</b><span>${fmtH(hh(e.time))}</span></button>`).join('')}</div>`).join('')}
+      ${Array.from({ length: H1 - H0 }, (_, i) => `<i class="hl" style="top:${pct(H0 + i)}"></i>`).join('')}</div>`;
+    }
+    const detail = sel ? `<div class="evd"><div><p class="eyebrow">${fmt(sel.date)} · ${fmtH(hh(sel.time))} to ${fmtH(hh(sel.time) + sel.minutes / 60)} · ${sel.type}${sel.status === 'done' ? ' · done' : ''}</p><h2 style="margin-top:4px">${esc(sel.name)}</h2><p class="sub" style="margin-top:2px">${esc(sel.reason || (sel.kind === 'first' ? 'First visit' : 'Clinic visit'))}</p><p class="ctxl" style="margin-top:8px"><b>Before the visit:</b> ${esc(sel.prep)}</p></div><div class="evdb"><button class="xbtn" data-ev="${S.evSel}" aria-label="Close">×</button><button class="btn sec" data-lv="open" data-v="prof" data-pid="${sel.patient_id}">Open patient</button></div></div>` : '';
+    const calls = D ? D.calls_to_make : [], hist = D ? D.call_history : [];
+    const crow = c => `<div class="crow"><div class="cmain"><b>${esc(c.name)}</b><span>${esc(c.why)}</span></div><span class="cdue${c.k === 'urg' ? ' now' : ''}">${esc(c.due)}</span>
+      <div class="cact"><span class="cph">${I().phone}${esc(c.phone || 'No phone')}</span>${PTL.logFor === c.patient_id ? '' : `<button class="btn sec" data-lv="schlog" data-pid="${c.patient_id}">Log call</button>`}</div>
+      ${PTL.logFor === c.patient_id ? `<div style="grid-column:1/-1;display:flex;gap:8px;margin-top:8px;flex-wrap:wrap"><input id="lv_scmin" type="number" min="1" value="10" aria-label="Minutes" style="width:80px"><input id="lv_scout" placeholder="What you agreed" style="flex:1;min-width:160px"><button class="btn" data-lv="schsave" data-pid="${c.patient_id}">Save</button><button class="btn sec" data-lv="schlog" data-pid="">Cancel</button></div>` : ''}</div>`;
+    return `${errBox()}<div class="mhead"><h1>Schedule</h1></div>
+      <div class="schgrid"><div class="card wcal">${bar}${cal}${detail}
+      <div class="calkey"><span><i class="clin"></i>In clinic</span><span><i class="new"></i>New patient</span><span><i class="call"></i>Phone</span><span><i class="urg"></i>After an alert</span></div></div>
+      <div class="schr"><div class="card pad"><div class="selhd"><h2>Calls to make</h2></div><div class="clist">${calls.map(crow).join('') || '<p class="sub">No calls due.</p>'}</div></div>
+      <div class="card pad hcard"><div class="selhd"><h2>Call history</h2></div><div class="hlist">${hist.map(h => `<div class="hrow"><span class="hchk">${I().check}</span><div><div class="hrt"><b>${esc(h.name)}</b><span>${fmt(h.date)}</span></div><p>${esc(h.agreed || '')}${h.minutes ? ` (${h.minutes} min)` : ''}</p></div></div>`).join('') || '<p class="sub">No calls logged yet.</p>'}</div></div></div></div>`;
+  }
+  PTL.views = { sched: schedView, msg: msgView, list: listView, wlist: listView, intake: intakeView, visit: visitView, plan: planView, review: reviewView, prof: profView, lvdone: doneView, sent: doneView, wsent: doneView, kept: doneView };
 
   // ---------- actions ----------
   let saveT = null;
@@ -338,6 +404,11 @@
         case 'thread': PTL.mdraft = ''; await loadMsgs(d.pid, true); A().render(); return scrollMsgs();
         case 'msgsend': return sendPtMsg((document.getElementById('lvmdraft') || {}).value);
         case 'mqr': PTL.mdraft = d.v; A().render(); { const x = document.getElementById('lvmdraft'); if (x) { x.focus(); x.setSelectionRange(x.value.length, x.value.length); } } return;
+        case 'schlog': PTL.logFor = d.pid || null; S._keep = true; A().render(); { const x = document.getElementById('lv_scout'); if (x) x.focus(); } return;
+        case 'schsave': {
+          await call('/api/calls', { patient_id: d.pid, minutes: Number(document.getElementById('lv_scmin').value || 0), agreed: document.getElementById('lv_scout').value });
+          PTL.logFor = null; await loadSched(true); S._keep = true; return A().render();
+        }
         case 'addtoggle': PTL.addOpen = !PTL.addOpen; return A().render();
         case 'addsave': {
           const name = document.getElementById('ap_name').value.trim();
@@ -399,8 +470,8 @@
     dev.addEventListener('change', ev => { if (ev.target.dataset.lvf !== undefined) { clearTimeout(saveT); saveFindings(); } }, true);
     // Side nav "Patients" goes to the live list.
     dev.addEventListener('click', ev => {
-      const b = ev.target.closest('[data-go="list"],[data-go="wlist"],[data-go="msg"]');
-      if (b) { ev.stopPropagation(); open(b.dataset.go === 'msg' ? 'msg' : 'list').then(() => { if (b.dataset.go === 'msg') scrollMsgs(); }); }
+      const b = ev.target.closest('[data-go="list"],[data-go="wlist"],[data-go="msg"],[data-go="sched"]');
+      if (b) { ev.stopPropagation(); const v = b.dataset.go === 'wlist' ? 'list' : b.dataset.go; open(v).then(() => { if (v === 'msg') scrollMsgs(); }); }
     }, true);
     // Check for new patient messages every few seconds (keeps what you are typing).
     setInterval(async () => {
@@ -414,6 +485,7 @@
             if (focused) { const x = document.getElementById('lvmdraft'); if (x) { x.focus(); x.setSelectionRange(pos, pos); } }
           }
         } else {
+          if (S.view === 'sched' && !PTL.logFor && await loadSched(true)) { S._keep = true; A().render(); }
           const before = JSON.stringify(PTL.cache.threads || []);
           PTL.cache.threads = (await call('/api/threads')).threads; syncSideCount();
           if (JSON.stringify(PTL.cache.threads) !== before && S.view === 'list') A().render();

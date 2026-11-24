@@ -9,6 +9,7 @@
   const PID_KEY = 'corehab_patient_id';
   const FEEL = { 'Easy': 'easy', 'Just right': 'just_right', 'Too hard': 'too_hard' };
   const NAMED = ['Swelling', 'Redness or warmth', 'Fever', 'Calf pain'];
+  const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   const DOW = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
@@ -99,6 +100,7 @@
     }));
     if (h.rest_days) app.RESTD.splice(0, app.RESTD.length, ...h.rest_days);
     S.streak = h.streak;
+    S.visitSet = !!(h.visits && h.visits.length);
     S.planUpdated = h.phase === 'plan_updated';
     S.phase = h.phase === 'intake' || h.phase === 'waiting_for_visit' ? 'waiting' : null;
     if (h.name) { S.info.name = h.name; if (S.ob && S.ob.a) S.ob.a.name = h.name; }
@@ -130,10 +132,12 @@
       [h, prog] = await Promise.all([call(`/api/home?patient_id=walter`), call(`/api/progress?patient_id=walter`)]);
     }
     const wasWaiting = A().S.phase === 'waiting';
+    CR.prog = prog;
     applyHome(h, prog);
     // First plan arrived while waiting: show "Your plan is ready" and the setup steps.
     if (wasWaiting && A().S.phase === null) A().S.phase = 'ready';
     await loadMsgs().catch(() => {});      // this patient's messages (a new account has none)
+    if (h.phase === 'discharged' && !CR.dischargeShown && A().S.screen === 'tabs') { CR.dischargeShown = true; A().go('discharge'); return; }
     if (['tabs', 'cover'].includes(A().S.screen)) A().render();
   }
 
@@ -151,6 +155,8 @@
     const body = { exercise_id: e.id, sets_done: Math.min(app.nsets(e), Math.ceil(reps / Math.max(1, app.target(e))) || 0),
       reps_done: reps, feeling: feel, note: ((S.exNotes || {})[idx] || '').trim() || undefined };
     if (feel === 'too_hard' && S.painAfter != null) body.pain_after = S.painAfter;
+    const cam = window.CAM && window.CAM.resultFor(e.id, reps);   // camera form scores (detection-live.js)
+    if (cam) Object.assign(body, cam);
     CR.ck.then(id => id && call('/api/result', Object.assign({ checkin_id: id }, body))).catch(err => console.warn('result', err));
   }
 
@@ -175,7 +181,8 @@
     if (b.id === 'afterNext') { postResult(S.exIdx); return; }
     if (b.id === 'wrapNext') {
       const bothered = (S.bother || []).map(id => ({ exercise_id: id, reason: ((S.whys || {})[id] || 'Something else').toLowerCase(), other: (S.whyO || {})[id] || '' }));
-      CR.ck && CR.ck.then(id => id && call('/api/session/end', { checkin_id: id, pain_end: S.endPain, bothered }))
+      const note = ((document.getElementById('endnote') || {}).value || '').trim();
+      CR.ck && CR.ck.then(id => id && call('/api/session/end', { checkin_id: id, pain_end: S.endPain, bothered, note }))
         .then(() => setTimeout(load, 300)).catch(err => console.warn('end', err));
       return;
     }
@@ -198,9 +205,8 @@
         .then(() => setTimeout(load, 200)).catch(err => console.warn('register', err));
       return;
     }
-    if (d.obnext !== undefined && S.ob && S.ob.step === 3) {   // setup checks: consent + safety
-      call('/api/consent', { patient_id: CR.pid, items: (S.ob.consent || []).map(String) }).catch(() => {});
-      call('/api/setup-check', { patient_id: CR.pid, safe: true, details: '' }).catch(() => {});
+    if (d.obnext !== undefined && S.ob && S.ob.step === 3 && S.ob.sub === 0) {   // setup: privacy consent
+      call('/api/consent', { patient_id: CR.pid, items: ['camera', 'data', 'billing'] }).catch(() => {});
       return;
     }
     if (d.signout !== undefined) {                            // Profile > Sign out
@@ -237,7 +243,7 @@
         localStorage.setItem(PID_KEY, CR.pid);
         o.remove();
         await load();
-        A().toTab('today');
+        if (CR.home && CR.home.phase === 'discharged') { CR.dischargeShown = true; A().go('discharge'); } else A().toTab('today');
         toast(`Signed in as ${r.name}`);
       } catch (e) { err.textContent = e.message; inp.focus(); }
     };
@@ -306,6 +312,111 @@
       .catch(err => { console.warn('message', err); toast('Message not sent: ' + err.message, true); });
   };
 
+  // ---------- visits ----------
+  const DOWF = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  const dt = iso => new Date(iso + 'T12:00:00');
+  const fmtT = t => { if (!t) return ''; const [h, m] = t.split(':').map(Number); return `${h % 12 || 12}:${String(m).padStart(2, '0')} ${h < 12 ? 'am' : 'pm'}`; };
+  const longDay = iso => { const d = dt(iso); return `${DOWF[d.getDay()]}, ${MON[d.getMonth()]} ${d.getDate()}`; };
+  CR.upcoming = () => {
+    // The next 3 days (session or rest, from the plan's rest days), then any visits the PT scheduled.
+    const rest = A().RESTD, out = [];
+    let newTagged = false;
+    for (let k = 1; out.length < 3 && k < 10; k++) {
+      const d = new Date(); d.setDate(d.getDate() + k);
+      const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`, wd = DOW[d.getDay()].slice(0, 3);
+      if (rest.includes(wd)) out.push({ k: 'rest', ic: 'moon', title: 'Rest day', when: longDay(iso), tag: wd === 'Sun' ? 'PT reviews your week' : '' });
+      else { out.push({ k: 'session', ic: 'dumbbell', title: 'Exercise session', when: longDay(iso), tag: A().S.planUpdated && !newTagged ? 'New plan' : '' }); newTagged = true; }
+    }
+    return out.concat(((CR.home && CR.home.visits) || []).map(v => ({ k: 'visit', ic: 'clinic',
+      title: v.kind === 'first' ? 'First visit with your PT' : 'Clinic visit with your PT', when: longDay(v.date),
+      tag: fmtT(v.time), time: fmtT(v.time), reason: v.reason })));
+  };
+  CR.visitCard = () => {
+    const v = CR.home.visits[0], d = dt(v.date);
+    return `<div class="obcal" style="flex:0 0 auto"><small>${MON[d.getMonth()].toUpperCase()}</small><b>${d.getDate()}</b><span>${DOWF[d.getDay()].slice(0, 3)}</span></div><div class="nutxt"><p>Visit scheduled</p><h2>Clinic visit, ${DOWF[d.getDay()]} at ${fmtT(v.time)}</h2><span>${v.reason ? esc(v.reason) + ' · ' : ''}${esc(v.place || 'Riverside Physical Therapy')}</span></div>`;
+  };
+  CR.firstVisit = () => {
+    const v = CR.home && (CR.home.first_visit || CR.home.visits[0]);
+    if (!v) return `<div class="obcal"><small>VISIT</small><b>?</b><span></span></div><div class="obvi"><b>Your clinic will call you to book your first visit</b><span>Riverside Physical Therapy, 400 Riverside Drive</span>`;
+    const d = dt(v.date);
+    return `<div class="obcal"><small>${MON[d.getMonth()].toUpperCase()}</small><b>${d.getDate()}</b><span>${DOWF[d.getDay()].slice(0, 3)}</span></div><div class="obvi"><b>${fmtT(v.time) || 'Time to be confirmed'} at ${esc(v.place || 'Riverside Physical Therapy')}</b><span>400 Riverside Drive, Pittsburgh</span>`;
+  };
+  CR.sentLine = () => CR.home && CR.home.intake_date ? `Sent ${longDay(CR.home.intake_date)}.` : 'Sent.';
+  CR.planAtVisit = () => { const v = CR.home && (CR.home.first_visit || CR.home.visits[0]);
+    return v ? `Your physical therapist makes your plan at your first visit on ${longDay(v.date)}.` : 'Your physical therapist makes your plan at your first visit.'; };
+
+  // ---------- discharge summary ----------
+  function dischargeView() {
+    const h = CR.home || {}, d = h.discharge || {};
+    const st = d.start || {}, fi = d.final || {};
+    const pw = CR.prog ? CR.prog.pain_by_week : [];
+    const pain = pw.length ? `${pw[0].pain_after} → ${pw[pw.length - 1].pain_after}` : '–';
+    const pair = (a, b, u) => (a != null || b != null) ? `${a ?? '–'}${u} → ${b ?? '–'}${u}` : '–';
+    const goals = (d.goals_week6 || h.goals || []).map(g => `<li>${esc(g)}</li>`).join('');
+    return `<div class="scr scroll"><div class="top"><button class="sec backb" data-tab="today">‹ Home</button><span style="flex:1"></span></div>
+      <div class="dhead" style="margin-top:16px"><div><h1 style="margin:0">You've finished your plan!</h1><p class="sub" style="margin:6px 0 0">${d.weeks ? d.weeks + ' weeks after surgery · ' : ''}Discharged ${d.date ? longDay(d.date) : ''}</p></div></div>
+      <div class="exstats dcstats"><div><b>${d.sessions_done ?? '–'}</b><span>sessions</span></div><div><b>${pain}</b><span>pain after exercise</span></div>
+      ${pair(st.bend_deg, fi.bend_deg, '°') !== '–' ? `<div><b>${pair(st.bend_deg, fi.bend_deg, '°')}</b><span>knee bend</span></div>` : ''}${pair(st.tug_sec, fi.tug_sec, ' s') !== '–' ? `<div><b>${pair(st.tug_sec, fi.tug_sec, ' s')}</b><span>Timed Up and Go</span></div>` : ''}</div>
+      <div class="card ptmsg" style="margin-top:16px"><div class="who"><span class="ini pic"><img src="img/dana.jpg" alt=""></span><div><b>A note from your PT</b></div></div><p>${esc(d.note || 'Great work. Keep up your home exercises.')}</p></div>
+      ${goals ? `<div class="card" style="margin-top:16px;padding:24px"><p class="eyebrow">Your goals</p><ul style="font-size:20px;line-height:1.6;margin:8px 0 0">${goals}</ul></div>` : ''}
+      ${d.community_program ? `<div class="card" style="margin-top:16px;padding:24px"><p class="eyebrow">Keep going</p><b style="font-size:21px">Your PT suggests a community exercise program</b><p class="sub" style="margin:6px 0 0">Ask the clinic about a walking or strength group near you.</p></div>` : ''}
+      <div class="foot"><span></span><button class="main" data-tab="today">Done</button></div></div>`;
+  }
+
+  // ---------- added to Lei's screens after each render ----------
+  function afterRender() {
+    const S = A().S, dev = document.getElementById('device');
+    // Goals and precautions from the PT's visit, on Home.
+    if (S.screen === 'tabs' && S.tab === 'today' && CR.home && (CR.home.goals.length || CR.home.precautions.length) && !document.getElementById('cr-goals')) {
+      const z = dev.querySelector('.zoomer');
+      if (z) z.insertAdjacentHTML('beforeend', `<div id="cr-goals" class="card" style="margin-top:20px;padding:24px 28px">
+        ${CR.home.goals.length ? `<p class="eyebrow" style="margin:0 0 6px">Your goals by week 6</p><ul style="margin:0 0 ${CR.home.precautions.length ? 16 : 0}px;padding-left:24px;font-size:20px;line-height:1.6">${CR.home.goals.map(g => `<li>${esc(g)}</li>`).join('')}</ul>` : ''}
+        ${CR.home.precautions.length ? `<p class="eyebrow" style="margin:0 0 6px;color:#9A5B00">Please be careful</p><ul style="margin:0;padding-left:24px;font-size:20px;line-height:1.6">${CR.home.precautions.map(g => `<li>${esc(g)}</li>`).join('')}</ul>` : ''}</div>`);
+    }
+    // End-of-session note: Lei's screen already has the text box (#endnote); add a "Speak" button next to it.
+    const en = document.getElementById('endnote'), SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (S.screen === 'wrap' && en && SR && !document.getElementById('cr-mic')) {
+      en.insertAdjacentHTML('afterend', '<button type="button" id="cr-mic" class="sec" style="min-width:0;height:56px;padding:0 22px;font-size:19px;margin-top:10px">🎤 Speak your note</button>');
+      const mic = document.getElementById('cr-mic');
+      mic.addEventListener('click', ev => {
+        ev.stopPropagation();
+        const rec = new SR(); rec.lang = 'en-US'; rec.interimResults = false;
+        mic.textContent = 'Listening…'; mic.disabled = true;
+        rec.onresult = e => { const t = e.results[0][0].transcript; en.value = (en.value ? en.value + ' ' : '') + t; en.dispatchEvent(new Event('input')); };
+        rec.onend = () => { mic.textContent = '🎤 Speak your note'; mic.disabled = false; };
+        rec.onerror = e => toast('Could not hear you: ' + e.error, true);
+        rec.start();
+      });
+    }
+  }
+
+  // ---------- safety check at setup (after the camera step) ----------
+  const SAFE_ITEMS = ['The floor is clear: no loose rugs or cords', 'A sturdy chair without wheels is nearby', 'You can reach a phone if you need help'];
+  function showSafety(btn) {
+    const o = document.createElement('div');
+    o.id = 'cr-safe';
+    o.style.cssText = 'position:fixed;inset:0;z-index:9997;background:rgba(14,17,22,.45);display:flex;align-items:center;justify-content:center';
+    o.innerHTML = `<div style="background:#fff;border-radius:24px;padding:34px 38px;width:min(620px,92vw);box-shadow:0 20px 60px rgba(0,0,0,.25)">
+      <h2 style="margin:0 0 6px;font-size:30px">Is your space safe?</h2><p style="margin:0 0 18px;font-size:19px;color:#4A515C">Tap each one that is true.</p>
+      ${SAFE_ITEMS.map((t, i) => `<label style="display:flex;gap:14px;align-items:center;padding:14px 16px;border:1.5px solid #D5DAE1;border-radius:14px;margin-bottom:10px;font-size:20px;cursor:pointer"><input type="checkbox" data-si="${i}" style="width:28px;height:28px">${t}</label>`).join('')}
+      <div style="display:flex;gap:12px;justify-content:flex-end;margin-top:16px;flex-wrap:wrap">
+        <button type="button" id="cr-unsafe" style="height:60px;padding:0 22px;border-radius:14px;border:1.5px solid #B9C0CA;background:#fff;font:inherit;font-size:19px;font-weight:600">Something isn't safe</button>
+        <button type="button" id="cr-safeok" disabled style="height:60px;padding:0 26px;border-radius:14px;border:0;background:#0E1116;color:#fff;font:inherit;font-size:19px;font-weight:600;opacity:.4">Yes, my space is safe</button></div></div>`;
+    document.body.appendChild(o);
+    const boxes = [...o.querySelectorAll('[data-si]')], ok = o.querySelector('#cr-safeok');
+    boxes.forEach(b => b.addEventListener('change', () => { const all = boxes.every(x => x.checked); ok.disabled = !all; ok.style.opacity = all ? 1 : .4; }));
+    const done = async safe => {
+      const missing = SAFE_ITEMS.filter((t, i) => !boxes[i].checked);
+      try { await call('/api/setup-check', { patient_id: CR.pid, safe, details: safe ? '' : 'Not true: ' + missing.join('; ') }); } catch (e) { toast(e.message, true); }
+      o.remove();
+      if (!safe) toast('Thanks for telling us. Your PT will call you before your first session.', true);
+      CR.safetyDone = true;
+      btn.click();
+    };
+    ok.onclick = () => done(true);
+    o.querySelector('#cr-unsafe').onclick = () => done(false);
+  }
+
   CR.restart = () => { localStorage.removeItem(PID_KEY); CR.pid = 'walter'; CR.msgCount = -1; load().then(loadMsgs).catch(() => {}); };
 
   CR.init = async function () {
@@ -320,6 +431,12 @@
     const st = document.createElement('style');
     st.textContent = '.live #simplan,.live #simvisit{display:none!important}';
     document.head.appendChild(st);
+    A().V.discharge = dischargeView;
+    new MutationObserver(() => { try { afterRender(); } catch (e) { console.warn(e); } }).observe(document.getElementById('device'), { childList: true });
+    document.getElementById('device').addEventListener('click', ev => {
+      const b = ev.target.closest('button[data-obnext]'), S = A().S;
+      if (b && S.ob && S.ob.step === 3 && S.ob.sub === 2 && !CR.safetyDone) { ev.stopPropagation(); ev.preventDefault(); showSafety(b); }
+    }, true);
     // "I already have an account" opens the sign-in box instead of going straight to the demo patient.
     document.getElementById('device').addEventListener('click', ev => {
       const b = ev.target.closest('button');
@@ -334,10 +451,16 @@
     CR.whoami();
     await loadMsgs().catch(() => {});
     // Waiting for the first plan: check every few seconds. Messages: check for the PT's replies.
-    setInterval(() => {
+    // Active patients: messages every 4 s, and the PT's changes (visits, plan, goals, discharge) on Home and Progress.
+    const sig = h => JSON.stringify([h.phase, h.visits, h.plan, h.goals, h.precautions, h.plan_change, h.rest_days]);
+    setInterval(async () => {
       if (!CR.live) return;
-      if (A().S.phase === 'waiting') load().catch(() => {});
-      else if (A().S.screen === 'tabs') loadMsgs().catch(() => {});
+      const S = A().S;
+      if (S.phase === 'waiting') return load().catch(() => {});
+      if (S.screen !== 'tabs') return;
+      loadMsgs().catch(() => {});
+      if (S.tab === 'messages' || S.upView != null) return;
+      try { const h = await call(`/api/home?patient_id=${CR.pid}`); if (CR.home && sig(h) !== sig(CR.home)) await load(); } catch (e) { /* server busy or stopped */ }
     }, 4000);
   };
 })();

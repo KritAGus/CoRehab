@@ -757,6 +757,7 @@ h2{margin:0;font-size:28px;line-height:36px;font-weight:600;letter-spacing:-0.01
 <div class="stagewrap" id="stagewrap"><div class="device" id="device"></div></div>
 
 <script src="patient-live.js"></script>
+<script type="module" src="detection-live.js"></script>
 <script>
 (function(){
 const dev=document.getElementById('device');
@@ -835,7 +836,7 @@ const nextMedal=()=>MEDALS.find(m=>S.streak<m.at);
 const P={};
 P.today=()=>{if(S.upView!=null)return upPage();if(S.phase)return waitHome();
  const notice=(S.planUpdated&&!S.planSeen?`<div class="nextup hvisit hnote"><span class="ini pic" style="width:64px;height:64px;flex:0 0 64px"><img src="img/dana.jpg" alt=""></span><div class="nutxt"><p>From Dana Reyes, PT</p><h2>Your PT updated your plan</h2><span>${window.CR&&CR.live?CR.when():'For next week, starting Monday, Nov 23.'}</span></div><button class="main" style="margin-left:auto;min-width:0" data-go="planChange">See what changed</button></div>`:S.planUpdated?`<div class="nextup hvisit hnote"><div class="nuart" style="width:64px;height:64px;flex:0 0 64px">${I.cal}</div><div class="nutxt"><p>New plan</p><h2>${window.CR&&CR.live?CR.startsLine():'Your new plan starts Monday, Nov 23'}</h2><span>${window.CR&&CR.live?CR.changeLine():'Sit-to-stands are new, and knee bends go up to 12.'}</span></div><button class="sec" style="margin-left:auto;min-width:0;height:60px;padding:0 24px;font-size:20px" data-go="planChange">See the plan</button></div>`:'')
- +(S.visitSet?`<div class="nextup hvisit hnote hvcal"><div class="obcal" style="flex:0 0 auto"><small>NOV</small><b>26</b><span>Thu</span></div><div class="nutxt"><p>Your PT wants to see you</p><h2>Clinic visit, Thursday at 10:30 am</h2><span>Riverside Physical Therapy, 400 Riverside Drive</span></div><button class="sec" style="margin-left:auto;min-width:0;height:60px;padding:0 24px;font-size:20px" data-upv="3">See details</button></div>`:'');
+ +(S.visitSet?`<div class="nextup hvisit hnote hvcal">${window.CR&&CR.live?CR.visitCard():`<div class="obcal" style="flex:0 0 auto"><small>NOV</small><b>26</b><span>Thu</span></div><div class="nutxt"><p>Your PT wants to see you</p><h2>Clinic visit, Thursday at 10:30 am</h2><span>Riverside Physical Therapy, 400 Riverside Drive</span></div>`}<button class="sec" style="margin-left:auto;min-width:0;height:60px;padding:0 24px;font-size:20px" data-upv="3">See details</button></div>`:'');
  const lm=lastMedal(),nm=nextMedal();
  const sess=doneToday()?(()=>{const sv=S.prange;S.prange='week';const ps=painSummary(),ch=chartSvg();S.prange=sv;const n=S.results.length;return `<button class="card donecard" data-tab="progress" aria-label="Today's session is done. See your progress">
    <div class="donehead"><span class="ck">${I.check}</span><h2>Today's session is done</h2><span class="chev" style="margin-left:auto">${I.chev}</span></div>
@@ -852,7 +853,7 @@ P.today=()=>{if(S.upView!=null)return upPage();if(S.phase)return waitHome();
  </div></div>
  <div class="sectionhead" style="margin-top:28px"><h2>Coming up</h2><button class="linkbtn" data-tab="progress">See your week</button></div>
  <div class="card hist">${upcoming().map((u,i)=>`<button class="hrow uprow" data-upv="${i}"><span class="upic ${u.k}">${I[u.ic]}</span><span class="t"><b>${u.when}</b><span>${u.title}</span></span>${u.tag?'<span class="uptag">'+u.tag+'</span>':''}<span class="chev">${I.chev}</span></button>`).join('')}</div>`;};
-function upcoming(){return [
+function upcoming(){if(window.CR&&CR.live)return CR.upcoming();return [
  {k:'session',ic:'dumbbell',title:'Exercise session',when:'Saturday, Nov 21'},
  {k:'rest',ic:'moon',title:'Rest day',when:'Sunday, Nov 22',tag:'PT reviews your week'},
  {k:'session',ic:'dumbbell',title:'Exercise session',when:'Monday, Nov 23',tag:S.planUpdated?'New plan':''},
@@ -861,22 +862,22 @@ function lastDanaWhen(){let sep='';let w='';S.msgs.forEach(m=>{if(m.sep)sep=m.se
 function waitHome(){const ready=S.phase==='ready';const first=(S.ob&&S.ob.a&&S.ob.a.name||'Walter').split(' ')[0];
  return `<div class="phead"><div><h1>Good morning, ${esc(first)}</h1><p class="sub">${ready?'Your plan is ready.':'Welcome to Homestretch.'}</p></div>${avatarBtnF()}</div>
  ${ready?`<div class="nextup mint"><div class="nuart">${I.dumbbell}</div><div class="nutxt"><p>From Dana Reyes, PT</p><h2>Your plan is ready</h2><span>A few quick steps to get started.</span></div><button class="main" style="margin-left:auto;min-width:0" data-obsetup>Finish setting up</button></div>`:
- `<div class="card wsent"><span class="obck">${I.check}</span><div><b>Your answers are with your physical therapist</b><span>Sent Tuesday, Oct 20.</span></div></div>`}
+ `<div class="card wsent"><span class="obck">${I.check}</span><div><b>Your answers are with your physical therapist</b><span>${window.CR&&CR.live?CR.sentLine():'Sent Tuesday, Oct 20.'}</span></div></div>`}
  <div class="sectionhead" style="margin-top:28px"><h2>${ready?'Your first visit is done':'Your first visit'}</h2></div>
- <div class="card obvisit" style="margin-top:0"><div class="obcal"><small>OCT</small><b>22</b><span>Thu</span></div><div class="obvi"><b>10:30 am at Riverside Physical Therapy</b><span>400 Riverside Drive, Pittsburgh</span><div class="obvp"><span class="ini pic sm"><img src="img/dana.jpg" alt=""></span>With Dana Reyes, PT</div></div>${ready?`<span class="exdone" style="margin-left:auto">${I.check}Done</span>`:`<button class="sec" style="margin-left:auto;min-width:0" data-addcal ${S.calAdded?'disabled':''}>${S.calAdded?I.check+'Added':I.cal+'Add to calendar'}</button>`}</div>
+ <div class="card obvisit" style="margin-top:0">${window.CR&&CR.live?CR.firstVisit():`<div class="obcal"><small>OCT</small><b>22</b><span>Thu</span></div><div class="obvi"><b>10:30 am at Riverside Physical Therapy</b><span>400 Riverside Drive, Pittsburgh</span>`}<div class="obvp"><span class="ini pic sm"><img src="img/dana.jpg" alt=""></span>With Dana Reyes, PT</div></div>${ready?`<span class="exdone" style="margin-left:auto">${I.check}Done</span>`:`<button class="sec" style="margin-left:auto;min-width:0" data-addcal ${S.calAdded?'disabled':''}>${S.calAdded?I.check+'Added':I.cal+'Add to calendar'}</button>`}</div>
  ${ready?'':`<div class="card wnote"><span class="hic">${I.plan}</span><div><b>Your exercise plan will show up here</b><span>Your physical therapist makes your plan at your visit.</span></div></div>`}`;}
-function emptyTab(t,s2){return `<div class="phead"><div><h1>${t}</h1></div>${avatarBtnF()}</div><div class="card wempty"><span class="hic">${I.plan}</span><b>${s2}</b><span>Your physical therapist makes your plan at your first visit on Thursday, Oct 22.</span></div>`;}
+function emptyTab(t,s2){return `<div class="phead"><div><h1>${t}</h1></div>${avatarBtnF()}</div><div class="card wempty"><span class="hic">${I.plan}</span><b>${s2}</b><span>${window.CR&&CR.live?CR.planAtVisit():'Your physical therapist makes your plan at your first visit on Thursday, Oct 22.'}</span></div>`;}
 function upPage(){const u=upcoming()[S.upView];if(!u){S.upView=null;return '';}
  const back=`<div class="phead"><button class="sec backb" data-upback>${I.back}Home</button>${avatarBtnF()}</div>`;
- if(u.k==='session')return back+`<div class="uphero"><p class="eyebrow">${u.when}</p><h1>Exercise session</h1><p class="sub">4 exercises, about 25 minutes</p></div>
+ if(u.k==='session')return back+`<div class="uphero"><p class="eyebrow">${u.when}</p><h1>Exercise session</h1><p class="sub">${PLAN.length} exercises, about 25 minutes</p></div>
   ${u.tag?`<div class="notice">${I.plan}<span><b>Your new plan starts this day.</b></span><button data-go="planChange">See what changed</button></div>`:''}
   <div class="extiles">${(u.tag==='New plan'?newPlan():PLAN).map((e,i)=>`<button class="extile" data-detail="${i}" data-from="today"><span class="exim"><img src="${e.img}" alt="" style="object-position:${e.thumb}"></span><span class="exnm"><b>${e.name}</b><span>${e.sets} sets of ${e.reps}</span></span></button>`).join('')}</div>
   <button class="card upinfo uprem" style="margin-top:16px" data-remedit><span class="upic rest">${I.clock}</span><div><b>Reminder at ${fmtTime(S.reminder)}</b><span>${S.rem.how.join(' and ')}</span></div><span class="ed">Edit</span><span class="chev">${I.chev}</span></button>`;
  if(u.k==='rest')return back+`<div class="uphero rest"><p class="eyebrow">${u.when}</p><h1>Rest day</h1><p class="sub">No exercises today. Enjoy your day off.</p></div>
   <div class="card upinfo"><span class="upic rest">${I.cal}</span><div><b>Your PT reviews your week</b><span>You'll see any changes to your plan on Monday.</span></div></div>
   <div class="card upinfo"><span class="upic rest">${I.check}</span><div><b>Your streak is safe</b><span>Rest days never break your streak.</span></div></div>`;
- return back+`<div class="uphero visit"><p class="eyebrow">${u.when}</p><h1>Clinic visit</h1><p class="sub">With Dana Reyes, PT</p></div>
-  <div class="card upinfo"><span class="upic visit">${I.clock}</span><div><b>10:30 am</b><span>About 45 minutes</span></div></div>
+ return back+`<div class="uphero visit"><p class="eyebrow">${u.when}</p><h1>Clinic visit</h1><p class="sub">${u.reason?esc(u.reason)+' · ':''}With Dana Reyes, PT</p></div>
+  <div class="card upinfo"><span class="upic visit">${I.clock}</span><div><b>${u.time||'10:30 am'}</b><span>About 45 minutes</span></div></div>
   <div class="card upinfo"><span class="upic visit">${I.home}</span><div><b>${esc(S.info.clinic)}</b><span>400 Riverside Drive, Pittsburgh, PA 15213</span></div></div>
   <div class="card upinfo"><span class="upic visit">${I.phone}</span><div><b>${esc(S.info.cphone)}</b><span>Call if you need to change the time</span></div></div>
   <div class="iact"><button class="sec" data-sheet="call">${I.phone}Call clinic</button><button class="main" style="min-width:0" data-addcal ${S.calAdded?'disabled':''}>${S.calAdded?I.check+'Added to calendar':I.cal+'Add to my calendar'}</button></div>`;}
@@ -1310,15 +1311,15 @@ V.todayPlan=()=>{const light=S.mode!=='full';S.exIdx=0;
  <div class="foot"><span></span><button class="main" data-go="setup">Set up the camera</button></div></div>`;};
 V.setup=()=>`<div class="cam fit${S.flip?' flip':''}"><img src="img/setup-wide.jpg" alt="Camera preview of Walter standing in his living room" style="object-position:50% 50%"><div class="frame${S.inFrame?' ok':''}"></div>
  <button class="ov camback" data-go="todayPlan">${I.back}Back</button>
- <div class="status ${S.inFrame?'ok':'wait'}">${S.inFrame?I.check+'You\'re in the frame':'Step back so we can see your whole leg'}</div>
- <div class="setuppanel"><p class="spt">Place the tablet at hip height, 2 steps away.</p>
-  <button class="main" style="min-width:0;width:100%" data-startex ${S.inFrame?'':'disabled'}>Start</button></div>
+ <div class="status ${S.inFrame||S.countdown?'ok':'wait'}">${S.countdown?I.check+'Hold still. Starting in '+S.countdown+'…':S.inFrame?I.check+'You\'re in the right spot':esc(S.posHint||'Step back so we can see your whole leg')}</div>
+ <div class="setuppanel"><p class="spt">${esc((window.CAM&&CAM.setupTip(PLAN[S.exIdx]))||'Place the tablet at hip height, 2 steps away.')}</p>
+  <button class="main" style="min-width:0;width:100%" data-startex ${S.inFrame||S.countdown?'':'disabled'}>${S.countdown?'Start now':'Start'}</button></div>
  <div style="position:absolute;left:24px;bottom:24px;display:flex;gap:12px"><button class="ov ctile" style="position:static" data-flip>${I.flip}Flip</button><button class="ov ctile" style="position:static" data-vtoggle aria-label="Voice guide ${S.voice?'on':'off'}">${S.voice?I.von:I.voff}${S.voice?'Voice on':'Voice off'}</button></div></div>`;
 function exStep(){return `<div class="exstep"><b>Exercise ${S.exIdx+1} of ${PLAN.length}</b><span class="exdots">${PLAN.map((x,i)=>`<i class="${i<S.exIdx?'d':i===S.exIdx?'n':''}"></i>`).join('')}</span></div>`;}
 V.intro=()=>{const e=PLAN[S.exIdx];return `<div class="scr"><div class="top">${exStep()}<span style="flex:1"></span><button class="exitb" data-sexit aria-label="End session">End</button></div>
  <div class="detail dfull" style="margin-top:16px;min-height:calc(744px / var(--tz,1) - 80px)">${videoBlock(e)}${howBlock(e,`<button class="main exgo" id="startEx">I'm ready, start</button><button class="sec exgo" data-go="${S.exIdx===0?'setup':'after'}">Back</button>`)}</div></div>`;};
 V.exercise=()=>{const e=PLAN[S.exIdx],t=target(e);
- const lines=S.fixOn?`<svg class="poselines" viewBox="0 0 1672 941" preserveAspectRatio="xMidYMid slice" aria-hidden="true"><polyline points="${e.lines.map(p=>p.join(',')).join(' ')}" fill="none" stroke="#FFC247" stroke-width="9" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="2 18"/>${e.lines.map(p=>'<circle cx="'+p[0]+'" cy="'+p[1]+'" r="15" fill="#FFC247"/>').join('')}</svg>`:'';
+ const lines=S.fixOn&&!(window.CAM&&CAM.counting())?`<svg class="poselines" viewBox="0 0 1672 941" preserveAspectRatio="xMidYMid slice" aria-hidden="true"><polyline points="${e.lines.map(p=>p.join(',')).join(' ')}" fill="none" stroke="#FFC247" stroke-width="9" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="2 18"/>${e.lines.map(p=>'<circle cx="'+p[0]+'" cy="'+p[1]+'" r="15" fill="#FFC247"/>').join('')}</svg>`:'';
  let over='';
  if(S.resting)over=`<div class="restbreak" role="status"><b>Set ${S.set-1} is done, take a break.</b><div class="rclock">0:${String(S.restLeft).padStart(2,"0")}</div><button class="main" data-restskip style="min-width:0;width:100%;margin-top:18px">I'm ready</button></div>`;
  if(S.paused)over=`<div class="paused"><h2>Paused</h2><p>Tap Resume when you're ready.</p><div style="display:flex;gap:12px"><button class="pill w" data-resume>${I.play}Resume</button><button class="pill r" data-end><span class="stopdot"><i></i></span>End</button></div></div>`;
@@ -1327,12 +1328,12 @@ V.exercise=()=>{const e=PLAN[S.exIdx],t=target(e);
  <div class="ov camname"><small>Exercise ${S.exIdx+1} of ${PLAN.length}</small>${e.name}</div>
  <div class="ov reps" role="status" aria-label="${S.rep} of ${t} reps, set ${S.set} of ${nsets(e)}"><div class="big">${S.rep}/${t}</div><div class="s">Set ${S.set} of ${nsets(e)}</div></div>
  <div class="tiles"><button class="ctile" data-flip aria-label="Flip camera">${I.flip}Flip</button><button class="ctile" data-vtoggle aria-label="Voice guide ${S.voice?'on':'off'}">${S.voice?I.von:I.voff}${S.voice?'Voice on':'Voice off'}</button></div>
- <div class="cue${S.fixOn?' fix':''}" role="status"><span class="cdot">${S.fixOn?I.bang:I.speak}</span>${S.fixOn?e.fix:e.cue}</div>
+ <div class="cue${S.fixOn?' fix':''}" role="status"><span class="cdot">${S.fixOn?I.bang:I.speak}</span>${S.fixOn?esc(S.fixText||e.fix):e.cue}</div>
  <div class="bar xbar"><button class="pill w" data-exback>${I.back}Back</button><button class="pill w" data-pause>${I.pause}Pause</button></div>${over}</div>`;};
 const FEELIC={'Easy':ic('<circle cx="12" cy="12" r="9"/><path d="M7.5 13h9c-.6 2.4-2.4 3.8-4.5 3.8S8.1 15.4 7.5 13z" fill="currentColor"/><path d="M9 9.5v.5M15 9.5v.5" stroke-width="2.8"/>',44,2),'Just right':ic('<circle cx="12" cy="12" r="9"/><path d="M8.5 14.5c1 1.2 2.2 1.8 3.5 1.8s2.5-.6 3.5-1.8"/><path d="M9 9.5v.5M15 9.5v.5" stroke-width="2.8"/>',44,2),'Too hard':ic('<circle cx="12" cy="12" r="9"/><path d="M8.5 16.5c1-1.2 2.2-1.8 3.5-1.8s2.5.6 3.5 1.8"/><path d="M9 10v.5M15 10v.5" stroke-width="2.8"/><path d="M7.5 8.7l2.5-1.2M16.5 8.7L14 7.5"/>',44,2)};
 V.after=()=>{const e=PLAN[S.exIdx];S.exNotes=S.exNotes||{};const hard=S.feel==='Too hard';const ok=S.painAfter!==null;
  return `<div class="scr"><div class="top">${exStep()}<span style="flex:1"></span><button class="exitb" data-sexit aria-label="End session">End</button></div>
- <h1 style="margin:8px 0 0">${e.name} done</h1>
+ <h1 style="margin:8px 0 0">${e.name} done</h1>${window.CAM?.summaryHtml?.(e.id)||''}
  <div style="margin-top:24px"><p class="q">How was that?</p><div class="feel3">${['Easy','Just right','Too hard'].map(f=>'<button class="feelb f'+f.replace(/ /g,'').toLowerCase()+'" data-feel="'+f+'" aria-pressed="'+(S.feel===f)+'">'+FEELIC[f]+f+'</button>').join('')}</div></div>
  ${hard?`<div class="hardbox"><div><p class="q">How does your knee feel now?</p>${painGrid('painAfter')}</div>
  <div style="margin-top:22px"><label class="q" for="exnote">What happened? <span style="font-weight:400;color:var(--ink-muted)">(optional)</span></label><textarea id="exnote" class="exnote" placeholder="For example: my knee hurt when I bent it">${esc(S.exNotes[S.exIdx]||'')}</textarea></div></div>
@@ -1398,7 +1399,8 @@ function render(){
  document.getElementById('jump').value=S.screen==='tabs'?(S.phase==='waiting'&&S.tab==='today'?'waiting':S.tab):S.screen==='onboard'?'ob'+S.ob.step:S.screen;
  document.getElementById('skip').hidden=S.screen!=='exercise';document.getElementById('simvisit').hidden=S.phase!=='waiting';document.getElementById('simplan').hidden=!!S.phase||S.screen==='onboard';document.getElementById('simplan').textContent=S.planUpdated?'Undo: PT updated plan':'Simulate: PT updated plan';
  bindInputs();
- if(S.screen==='setup'&&!S.inFrame)later(()=>{if(S.screen==='setup'){S.inFrame=true;render();}},2200);
+ if(window.CAM)CAM.afterRender(); /* live camera (detection-live.js) */
+ if(S.screen==='setup'&&!S.inFrame&&!(window.CAM&&CAM.active()))later(()=>{if(S.screen==='setup'){S.inFrame=true;render();}},2200);
 }
 function bindInputs(){
  bindChart();
@@ -1425,14 +1427,18 @@ function go(scr){clearT();S.paused=false;S.ending=false;S.sexit=false;S.resting=
  if(TABS.includes(scr)||scr==='exdetail'){toTab(scr);return;}
  if(scr==='myplan'&&S.screen==='tabs'&&S.tab!=='exdetail')S.planFrom='tab:'+S.tab;
  if(scr==='painBefore'){S.painBefore=null;S.symBefore=[];S.symBeforeT=false;}
- if(scr==='setup')S.inFrame=false;
+ if(scr==='setup'){S.inFrame=false;S.countdown=null;}
  S.screen=scr;render();}
 
 /* exercise engine */
-function tick(){if(S.screen!=='exercise'||S.paused||S.ending||S.resting)return;const e=PLAN[S.exIdx],t=target(e);S.rep++;S.fixOn=(S.set===1&&(S.rep===4||S.rep===5));
- if(S.rep>=t){if(S.set>=nsets(e)){S.results.push({id:e.id,reps:t*nsets(e)});S.fixOn=false;render();later(finishExercise,700);return;}
-  render();later(()=>{S.set++;S.rep=0;S.resting=true;S.restLeft=15;S.fixOn=false;render();later(restTick,1000);},600);return;}
- render();later(tick,750);}
+/* One rep done. fix: the camera's correction for this rep ('' = good rep); undefined = demo timer. Returns true if the set goes on. */
+function stepRep(fix){const e=PLAN[S.exIdx],t=target(e);S.rep++;S.fixOn=fix!==undefined?!!fix:(S.set===1&&(S.rep===4||S.rep===5));S.fixText=fix||null;
+ if(S.rep>=t){if(S.set>=nsets(e)){S.results.push({id:e.id,reps:t*nsets(e)});S.fixOn=false;render();later(finishExercise,700);return false;}
+  render();later(()=>{S.set++;S.rep=0;S.resting=true;S.restLeft=15;S.fixOn=false;render();later(restTick,1000);},600);return false;}
+ render();return true;}
+function tick(){if(S.screen!=='exercise'||S.paused||S.ending||S.resting)return;if(window.CAM&&CAM.counting())return; /* the camera counts (detection-live.js) */
+ if(stepRep())later(tick,750);}
+function camRep(fix){if(S.screen!=='exercise'||S.paused||S.ending||S.resting)return false;stepRep(fix||'');return true;}
 function restTick(){if(!S.resting||S.screen!=='exercise')return;if(S.paused||S.ending){later(restTick,1000);return;}S.restLeft--;if(S.restLeft<=0){endRest();return;}render();later(restTick,1000);}
 function endRest(){S.resting=false;render();later(tick,700);}
 function advanceEx(){if(S.exIdx<PLAN.length-1){S.exIdx++;go('intro');return;}S.endPain=null;S.bother=[];S.botherT=false;go('wrap');}
@@ -1445,7 +1451,7 @@ function endSheet(msg,no,yes){const w=S.stopWhy;const pain=w==='Pain';const ok=!
  ${hi?`<div class="ban urg" style="margin-top:14px"><div class="ic">${I.bang}</div><div><b>Call 911</b> if you have chest pain, trouble breathing, or your leg is suddenly very swollen.</div></div>`:''}
  <div class="row" style="margin-top:18px"><button class="sec" ${no}>Keep going</button><button class="main" style="min-width:0" ${yes} ${ok?'':'disabled'}>End session</button></div></div></div>`;}
 function finishExercise(){S.painAfter=null;S.feel=null;S.symAfter=[];S.symAfterT=false;go('after');}
-function startExercise(){S.set=1;S.rep=0;S.fixOn=false;go('exercise');later(tick,900);}
+function startExercise(){S.set=1;S.rep=0;S.fixOn=false;S.fixText=null;if(window.CAM)CAM.startExercise(PLAN[S.exIdx]);go('exercise');later(tick,900);}
 function finishSession(early){S.streak++;S.medalNew=MEDALS.find(m=>m.at===S.streak)||null;clearT();S.early=!!early;if(early){go('done');return;}S.screen='celebrate';
  const m=S.medalNew;const ov=document.createElement('div');ov.className='cele-ov';ov.setAttribute('role','status');
  ov.innerHTML=`<div class="pop">${I.popper}</div><h2>Today's exercises are done!</h2>${m?'<div class="md">'+medalSvg(m.face,64)+'New medal: '+m.name+'</div>':''}<button class="sec cont" data-go="done">Continue</button>`;dev.appendChild(ov);
@@ -1595,7 +1601,7 @@ document.getElementById('simvisit').addEventListener('click',()=>{S.phase='ready
 document.getElementById('simplan').addEventListener('click',()=>{S.planUpdated=!S.planUpdated;S.planSeen=false;toTab('today');});
 document.getElementById('skip').addEventListener('click',()=>{if(S.screen!=='exercise')return;clearT();const e=PLAN[S.exIdx];S.results.push({id:e.id,reps:target(e)*nsets(e)});finishExercise();});
 S=fresh();
-window.CRAPP={get S(){return S},PLAN,STS,CHANGES,WEEK,LASTWEEK,RESTD,MEDALS,WLAB,WEEKPLAN,render,go,toTab,target,nsets}; /* CoRehab hooks */
+window.CRAPP={get S(){return S},V,PLAN,STS,CHANGES,WEEK,LASTWEEK,RESTD,MEDALS,WLAB,WEEKPLAN,render,go,toTab,target,nsets,camRep}; /* CoRehab hooks */
 render();fit();if(window.CR)CR.init();
 })();
 </script>

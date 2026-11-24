@@ -12,6 +12,7 @@ Endpoint the detection node calls after each exercise:
   {"checkin_id": 1, "exercise_id": "mini_squat", "sets_done": 3, "reps_done": 21,
    "form_scores": [0.9, 0.8, ...], "error_counts": {"trunk_lean": 2}, "pain_after": 4}
 """
+import datetime as dt
 import json
 import os
 import threading
@@ -208,6 +209,11 @@ class Handler(BaseHTTPRequestHandler):
             return {"threads": clinic.threads(con)}
         if path == "/api/llm-status":
             return rn.llm_status(test_call=True)
+        if path == "/api/schedule":
+            today = dt.date.today()
+            start = q.get("start") or (today - dt.timedelta(days=today.weekday())).isoformat()
+            end = q.get("end") or (dt.date.fromisoformat(start) + dt.timedelta(days=6)).isoformat()
+            return clinic.schedule(con, start, end)
         if path == "/api/clinic":
             return clinic.CLINIC
         return None

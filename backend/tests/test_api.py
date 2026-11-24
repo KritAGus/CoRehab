@@ -212,3 +212,36 @@ def test_login_by_name_or_username(api):
 def test_rules_draft_says_why(api):
     _, d = api("/api/first-plan/draft", {"patient_id": "maria"})
     assert d["draft"]["source"] == "rules" and d["draft"]["ai_note"]                    # no key in tests
+
+
+def test_home_shows_visits_goals_and_end_note(api):
+    _, v = api("/api/visits/schedule", {"patient_id": "ruth", "date": "2030-03-04", "time": "14:00", "reason": "Check swelling"})
+    _, h = api("/api/home?patient_id=ruth")
+    assert any(x["visit_id"] == v["visit_id"] and x["time"] == "14:00" for x in h["visits"])
+    _, w = api("/api/home?patient_id=walter")
+    assert w["goals"] and w["precautions"] and "visits" in w
+    _, prof = api("/api/profile?patient_id=walter")
+    assert prof["sessions"][0]["note"] == "ok"          # end-of-session note from test_session_flow reaches the PT
+
+
+def test_unsafe_setup_makes_urgent_alert(api):
+    _, r = api("/api/register", {"name": "Omar Lee", "dob": "1950-05-05", "phone": "7"})
+    _, s = api("/api/setup-check", {"patient_id": r["patient_id"], "safe": False, "details": "Not true: floor is clear"})
+    assert s["urgent"]
+    _, prof = api(f"/api/profile?patient_id={r['patient_id']}")
+    assert any(a["tier"] == "urgent" and "floor is clear" in a["reason"] for a in prof["alerts"])
+    _, ok = api("/api/setup-check", {"patient_id": "walter", "safe": True})
+    assert not ok["urgent"]
+
+
+def test_schedule_shows_visits_and_calls(api):
+    _, v = api("/api/visits/schedule", {"patient_id": "dorothy", "date": "2030-04-03", "time": "11:15", "reason": "Week 6 check"})
+    _, s = api("/api/schedule?start=2030-04-01&end=2030-04-07")
+    e = next(x for x in s["events"] if x["visit_id"] == v["visit_id"])
+    assert e["name"] == "Dorothy Hayes" and e["time"] == "11:15" and e["type"] == "In clinic"
+    _, s = api("/api/schedule")
+    assert s["calls_to_make"] and s["calls_to_make"][0]["due"] in ("Today",) or all(c["k"] != "urg" for c in s["calls_to_make"])
+    pid = s["calls_to_make"][0]["patient_id"]
+    api("/api/calls", {"patient_id": pid, "minutes": 9, "agreed": "All good"})
+    _, s2 = api("/api/schedule")
+    assert pid not in [c["patient_id"] for c in s2["calls_to_make"]] and s2["call_history"][0]["agreed"] == "All good"
