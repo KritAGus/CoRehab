@@ -38,6 +38,7 @@
   };
 
   const CR = { live: false, pid: null, home: null, ck: null, sent: {} };
+  CR.generalUrgent = ['New locking or giving way', 'Cannot bear weight or straighten after injury', 'Severe new swelling or deformity'];
   window.CR = CR;
 
   async function call(path, body) {
@@ -160,23 +161,33 @@
     CR.ck.then(id => id && call('/api/result', Object.assign({ checkin_id: id }, body))).catch(err => console.warn('result', err));
   }
 
+  document.addEventListener('change', ev => {
+    if (ev.target.id === 'kneeMorning') A().S.kneeMorning = ev.target.value;
+  });
   CR.beforeClick = function (b, d) {
     if (!CR.live) return;
     const app = A(), S = app.S;
     if (b.id === 'painNext') {
       const sym = S.symBefore || [];
-      const worry = { symptoms: sym.filter(x => NAMED.includes(x)).map(x => x.toLowerCase()), other: sym.includes('Something else') ? (S.symBeforeO || 'Something else') : '' };
+      const worry = { symptoms: sym.filter(x => NAMED.includes(x) || CR.generalUrgent.includes(x)).map(x => x.toLowerCase()), other: sym.includes('Something else') ? (S.symBeforeO || 'Something else') : '' };
       CR.sent = {};
-      CR.ck = call('/api/checkin', { patient_id: CR.pid, pain_today: S.painBefore, worry }).then(r => {
+      const general = CR.home && CR.home.care_pathway === 'general';
+      if (general) b.disabled = true;
+      CR.ck = call('/api/checkin', { patient_id: CR.pid, pain_today: S.painBefore, worry,
+        next_morning: general ? (S.kneeMorning || 'unknown') : undefined }).then(r => {
         CR.ckDate = r.date;
         // The server decides today's dose. Fix the screen if its rule disagrees.
         const S2 = A().S;
         const mode = r.action === 'rest' ? 'rest' : r.action === 'as_planned' ? 'full' : r.exercises[0] && r.exercises[0].target_reps / r.exercises[0].planned_reps <= 0.55 ? 'l50' : 'l70';
-        if (mode === 'rest' && S2.screen !== 'rest') A().go('rest');
+        if (general) {
+          if (S2.screen !== 'painBefore') return r.checkin_id;
+          S2.mode = mode; S2.kneeHold = r.message; S2.exIdx = 0; S2.results = [];
+          A().go(mode === 'rest' ? 'rest' : 'todayPlan');
+        } else if (mode === 'rest' && S2.screen !== 'rest') A().go('rest');
         else if (mode !== 'rest' && S2.mode !== mode) { S2.mode = mode; if (S2.screen === 'todayPlan') A().render(); }
         return r.checkin_id;
-      }).catch(err => { console.warn('checkin', err); return null; });
-      return;
+      }).catch(err => { if (general) { b.disabled = false; CR.toast('Could not confirm today’s plan. Please try again.', true); } console.warn('checkin', err); return null; });
+      return general;
     }
     if (b.id === 'afterNext') { postResult(S.exIdx); return; }
     if (b.id === 'wrapNext') {

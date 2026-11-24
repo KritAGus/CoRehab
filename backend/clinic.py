@@ -128,6 +128,8 @@ def register(con, name, dob=None, phone=None, surgery_date=None, side=None):
         raise ValueError("Name is required.")
     pid = _new_id(con, name)
     rn.add_patient(con, pid, name.strip(), surgery_date or "", side or "", "", dob=dob, phone=phone, status="active")
+    rn.knee_rules.save(con, pid, {"pathway": "unspecified"})
+    con.commit()
     return {"patient_id": pid, "username": pid}
 
 
@@ -135,6 +137,8 @@ def add_patient_by_pt(con, name, phone, surgery, surgery_date, side="right", dob
     """PT adds a patient; they get an intake link (status intake_sent)."""
     pid = _new_id(con, name)
     rn.add_patient(con, pid, name, surgery_date, side, "", phone=phone, dob=dob, status="intake_sent")
+    path = {"General knee": "general", "Knee replacement": "replacement"}.get(surgery, "unspecified")
+    rn.knee_rules.save(con, pid, rn.knee_rules.validate({"pathway": path}))
     con.execute("UPDATE patients SET goal=? WHERE patient_id=?", ("", pid))
     con.commit()
     return {"patient_id": pid, "status": "intake_sent", "surgery": surgery}
@@ -195,6 +199,8 @@ FINDING_FIELDS = {
 def save_findings(con, pid, fields, visit_id=None):
     """Autosave clinic-visit findings as the PT types. Creates today's visit record if there is none."""
     _patient(con, pid)
+    fields = dict(fields)
+    assessment = rn.knee_rules.validate(fields.pop("knee_assessment")) if "knee_assessment" in fields else None
     clean = {}
     for k, v in fields.items():
         if k not in FINDING_FIELDS:
@@ -215,8 +221,13 @@ def save_findings(con, pid, fields, visit_id=None):
                                     CLINIC["name"], _now())).lastrowid
         else:
             visit_id = r["visit_id"]
+    if assessment is not None:
+        rn.knee_rules.save(con, pid, assessment)
     old = con.execute("SELECT findings_json FROM visits WHERE visit_id=?", (visit_id,)).fetchone()
     merged = {**json.loads((old["findings_json"] if old else None) or "{}"), **clean}
+    if (clean.get("pain_today") is not None and clean["pain_today"] >= rn.STOP_PAIN
+            and rn.knee_rules.assessment(con, pid)["pathway"] == "general" and not rn.knee_rules.urgent_alert(con, pid)):
+        rn.add_alert(con, pid, dt.date.today().isoformat(), "urgent", "High pain reported at the knee assessment.", "knee_screen")
     con.execute("UPDATE visits SET findings_json=?, status='done', updated_at=? WHERE visit_id=?",
                 (json.dumps(merged), _now(), visit_id))
     con.commit()
@@ -480,7 +491,8 @@ def home(con, pid, today=None):
         " ORDER BY date, time", (pid, today.isoformat()))]
     first = con.execute("SELECT visit_id, kind, status, date, time, place, reason FROM visits WHERE patient_id=? AND kind='first'"
                         " ORDER BY date DESC LIMIT 1", (pid,)).fetchone()
-    return {"patient_id": pid, "name": p["name"], "first_name": (p["name"] or "").split(" ")[0], "phase": phase,
+    return {"care_pathway": rn.knee_rules.assessment(con, pid)["pathway"],
+            "patient_id": pid, "name": p["name"], "first_name": (p["name"] or "").split(" ")[0], "phase": phase,
             "visits": visits, "first_visit": dict(first) if first else None,
             "goals": f.get("goals_week6") or [], "precautions": f.get("precautions") or [],
             "intake_date": intake["created_at"][:10] if intake and intake.get("created_at") else None,
@@ -532,7 +544,8 @@ def patient_row(con, p, today):
     days_since = (today - dt.date.fromisoformat(last)).days if last else None
     monday = today - dt.timedelta(days=today.weekday())
     nv = next_visit(con, pid, today)
-    wk = _week_post_op(p, today)
+    pathway = rn.knee_rules.assessment(con, pid)["pathway"]
+    wk = _week_post_op(p, today) if pathway == "replacement" else None
 
     if p["status"] == "discharged":
         group, nxt = "discharged", "Discharged"
@@ -553,7 +566,8 @@ def patient_row(con, p, today):
         group = "on_track"
         nxt = f"Visit {_nice(nv['date'], nv['time'])}" if nv else (f"Week {wk + 1} starts Mon" if wk is not None else "")
     return {"patient_id": pid, "name": p["name"], "age": _age(p["dob"], today),
-            "surgery": f"{(p['operated_side'] or '').capitalize()} knee replacement".strip(),
+            "surgery": (f"{(p['operated_side'] or '').capitalize()} knee replacement".strip() if pathway == "replacement"
+                        else "General knee" if pathway == "general" else "Knee assessment pending"),
             "surgery_date": p["surgery_date"], "week_post_op": wk, "group": group, "next": nxt,
             "last_session": last, "days_since_session": days_since,
             "pain_after_this_week": _pain_after_week(con, pid, monday),
@@ -616,7 +630,8 @@ def profile(con, pid, today=None):
     history = [dict(r) for r in con.execute(
         "SELECT start_date, end_date, approved_by, GROUP_CONCAT(exercise_name || ' ' || sets || 'x' || reps, ', ') AS plan"
         " FROM plan_items WHERE patient_id=? GROUP BY start_date ORDER BY start_date DESC", (pid,))]
-    return {"patient": {**patient_row(con, p, today), "dob": p["dob"], "phone": p["phone"], "goal": p["goal"],
+    return {"knee_assessment": rn.knee_rules.assessment(con, pid), "knee_form": rn.knee_rules.form_options(),
+            "patient": {**patient_row(con, p, today), "dob": p["dob"], "phone": p["phone"], "goal": p["goal"],
                         "rest_days": rn.rest_days(con, pid)},
             "intake": rn.latest_intake(con, pid), "plan": rn.current_plan(con, pid), "plan_history": history,
             "sessions": sessions, "pain_by_week": pain_series(con, pid),
@@ -759,10 +774,20 @@ def create_first_plan_request(con, pid, use_llm=True):
     intake = rn.latest_intake(con, pid)
     f = latest_findings(con, pid)
     findings = f["findings"] if f else {}
-    rules = first_plan_rules(intake, findings, week)
-    draft = (llm_first_plan(intake, findings, week, rules) if use_llm else None) or dict(rules, ai_note=rn.ai_note(use_llm))
+    assessment = rn.knee_rules.assessment(con, pid)
+    if assessment["pathway"] == "general" and rn.current_plan(con, pid):
+        review = rn.create_adjustment_request(con, pid, use_llm=use_llm)
+        return {**review, "week_post_op": None}
+    if assessment["pathway"] == "replacement":
+        rules = first_plan_rules(intake, findings, week)
+        draft = (llm_first_plan(intake, findings, week, rules) if use_llm else None) or dict(rules, ai_note=rn.ai_note(use_llm))
+    else:
+        week = None
+        draft = rn.knee_rules.draft(con, pid, assessment, p["goal"], use_llm=use_llm, pain_today=findings.get("pain_today"))
     con.execute("UPDATE adjustment_requests SET status='superseded' WHERE patient_id=? AND status='pending' AND kind='first'", (pid,))
     summary = {"patient_id": pid, "kind": "first", "week_post_op": week, "findings": findings, "exercises": []}
+    if assessment["pathway"] != "replacement":
+        summary["knee_assessment"] = assessment
     cur = con.execute("INSERT INTO adjustment_requests (patient_id, week_end, summary_json, draft_json, draft_source, status, kind)"
                       " VALUES (?,?,?,?,?, 'pending', 'first')",
                       (pid, dt.date.today().isoformat(), json.dumps(summary), json.dumps(draft), draft["source"]))

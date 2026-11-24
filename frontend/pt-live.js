@@ -85,8 +85,9 @@
     const today = new Date();
     const add = PTL.addOpen ? `<div class="card pad" style="margin-top:14px"><h2>Add a patient</h2><p class="sub">They get a link to fill in the intake before the first visit.</p>
       <div class="form f3" style="margin-top:12px"><div class="fld"><label for="ap_name">Full name</label><input id="ap_name"></div><div class="fld"><label for="ap_phone">Mobile number</label><input id="ap_phone"></div>
-      <div class="fld"><label for="ap_date">Surgery date</label><input id="ap_date" type="date" value="${new Date(Date.now() - 5 * 864e5).toISOString().slice(0, 10)}"></div>
-      <div class="fld"><label for="ap_side">Knee</label><select id="ap_side"><option value="right">Right knee replacement</option><option value="left">Left knee replacement</option></select></div></div>
+      <div class="fld"><label for="ap_path">Care pathway</label><select id="ap_path"><option value="replacement">Knee replacement</option><option value="general">General knee (nonoperative)</option></select></div>
+      <div class="fld" id="ap_surgical_date"><label for="ap_date">Surgery date</label><input id="ap_date" type="date" value="${new Date(Date.now() - 5 * 864e5).toISOString().slice(0, 10)}"></div>
+      <div class="fld"><label for="ap_side">Knee</label><select id="ap_side"><option value="right">Right knee</option><option value="left">Left knee</option></select></div></div>
       <div class="foot" style="margin-top:12px"><button class="btn sec" data-lv="addtoggle">Cancel</button><button class="btn" data-lv="addsave">${I().send}Send intake link</button></div></div>` : '';
     return `<div class="mhead"><h1>Patients</h1><span class="sub" style="margin:0">${DOW[today.getDay()]}, ${MON[today.getMonth()]} ${today.getDate()}</span></div>${errBox()}
       <div class="ptool"><div class="tabs2 ptabs">${tab('needs', 'Needs you', needs)}${tab('all', 'All', L.patients.length)}${tab('new', 'New', c.new || 0)}${tab('discharged', 'Discharged', c.discharged || 0)}</div>
@@ -113,6 +114,27 @@
     ['Function', [['tug_sec', 'Timed Up and Go', 'sec'], ['chair_stand_30s', '30-second chair stand', 'stands'], ['walking_aid', 'Walking aid', ['None', 'Cane', 'Walker']], ['stairs', 'Stairs', ['independent', 'step to step, rail', 'not yet']]]],
     ['Knee', [['sw_r', 'Swelling, operated knee', 'cm'], ['sw_l', 'Other knee, to compare', 'cm'], ['incision', 'Incision', ['Healing well', 'Some redness', 'Drainage']]]],
   ];
+  function kneeFields(profile) {
+    const form = profile.knee_form, a = profile.knee_assessment;
+    if (!form || !a) return '';
+    const select = (key, label, options, fallback) => {
+      const selected = a[key] || fallback;
+      return `<div class="fld"><label for="lv_kg_${key}">${esc(label)}</label><select id="lv_kg_${key}" data-lvf>${Object.entries(options).map(([id, text]) => `<option value="${esc(id)}"${id === selected ? ' selected' : ''}>${esc(text)}</option>`).join('')}</select></div>`;
+    };
+    const cap = (key, max) => `<div class="fld"><label for="lv_kg_${key}">${key === 'sets' ? 'Sets' : 'Reps per set'} for new exercises</label><input id="lv_kg_${key}" type="number" min="1" max="${max}" data-lvf value="${esc(a[key] ?? '')}"></div>`;
+    return `<div class="vsec"><p class="eyebrow">Exercise recommendation</p>
+      ${select('pathway', 'Care pathway', form.pathway, 'unspecified')}
+      <div id="lv_kg_details"${a.pathway === 'general' ? '' : ' hidden'}>
+      <div class="form f2">${select('pattern', 'Reported symptom pattern', form.pattern, 'other')}
+      ${select('clearance', 'Clinical screen', form.clearance, 'unknown')}
+      ${select('loading', 'Loading permission', form.loading, 'unknown')}
+      ${select('bend_position', 'Preferred position for knee bending', {lying:'Lying', seated:'Seated'}, 'lying')}</div>
+      <p class="hint">Screen for a newly locked or unstable knee, inability to bear weight, severe swelling, a hot red knee with fever, or new one-sided calf pain with swelling. Arrange urgent medical assessment when indicated.</p>
+      <fieldset><legend>Examined findings and tolerated movements</legend>${Object.entries(form.findings).map(([id, label]) =>
+        `<label style="display:block;margin:8px 0"><input type="checkbox" data-lvf data-kg-finding="${esc(id)}"${(a.findings || []).includes(id) ? ' checked' : ''}> ${esc(label)}</label>`).join('')}</fieldset>
+      <div class="form f2">${cap('sets', 5)}${cap('reps', 15)}</div>
+      <p class="hint">These values also cap weekly increases. Select only the standard unweighted movements the patient can perform with the app’s camera instructions.</p></div></div>`;
+  }
   function visitView() {
     const P = PTL.cache.profile[PTL.pid];
     if (!P) return errBox();
@@ -124,11 +146,12 @@
     const txt = (k, l, v) => `<div class="fld"><label for="lv_${k}">${l}</label><textarea id="lv_${k}" data-lvf="${k}" rows="3">${esc(v)}</textarea></div>`;
     return head(P.patient, 'list', 'Step 2 of 3: clinic visit') + `<div class="vgrid"><div class="card pad">
       <div class="vcard"><div><h2>Clinic visit</h2><p class="sub" style="margin-top:2px">${fmt(new Date().toISOString())} · Riverside Physical Therapy</p></div><span class="vsave" id="lvsave">${I().check}Saved</span></div>
+      ${kneeFields(P)}
       ${VFIELDS.map(([t, fs]) => `<div class="vsec"><p class="eyebrow">${t}</p><div class="form f3">${fs.map(field).join('')}</div></div>`).join('')}
       <div class="vsec"><p class="eyebrow">Goals and precautions</p><div class="form f2">${txt('goals_week6', 'Goals by week 6 (one per line; the patient sees these)', (f.goals_week6 || []).join('\n'))}${txt('precautions', 'Precautions (one per line)', (f.precautions || []).join('\n'))}</div></div>
       <div class="vsec"><div class="form">${txt('notes', 'Short notes (PT only)', f.notes || '')}</div></div></div>
       <div><div class="card pad"><h2>From the intake</h2><p class="sub" style="white-space:pre-line">${esc(P.intake ? P.intake.summary : 'No intake yet.')}</p></div>
-      <div class="card pad sec2 fpnext"><span class="spark">${I().spark}</span><div class="fptx"><h2>Next: first plan</h2><p class="sub" style="margin-top:4px">AI drafts it from this visit, the intake and the clinic's knee replacement protocol. Each exercise comes with a reason; you accept or reject each one before it's sent.</p></div>
+      <div class="card pad sec2 fpnext"><span class="spark">${I().spark}</span><div class="fptx"><h2>Exercise plan</h2><p class="sub" style="margin-top:4px">The selected pathway and visit findings guide the draft. Each exercise comes with a reason; you accept or reject each one before it's sent.</p></div>
       <div class="fpbtns"><button class="btn" data-lv="firstdraft">${I().spark}Draft plan with AI</button></div></div></div></div>
       <div class="foot"><button class="btn sec" data-lv="go" data-v="intake">Back</button></div>`;
   }
@@ -147,16 +170,23 @@
       const e = ex(i.exercise_id), v = PTL.dec[i.exercise_id];
       const change = i.action === 'hold' ? '' : `${i.before ? `<s>${i.before.replace(' x ', ' × ')}</s> → ` : ''}${i.sets ? dose(i.sets, i.reps) : 'paused'}`;
       return `<div class="srow rvrow${i.action !== 'hold' && v !== 'reject' ? ' sugd' : ''}"><img src="${e.img}" alt=""><div><b>${esc(e.n)}</b><span class="tag ${tagc[i.action]}">${lab[i.action]}${change ? ': ' + change : ''}</span></div>
+        ${i.intensity ? `<p class="hint">${esc(i.intensity)} · ${esc(i.setup)} · <a href="${esc(i.source_url)}" target="_blank" rel="noopener">Exercise source</a></p>` : ''}
         <div class="rvctl"><span class="hint" style="margin:0">${i.action === 'hold' ? dose(i.sets, i.reps) : ''}</span></div>
         ${i.action !== 'hold' ? `<div class="fwhy"><span class="fwt">${I().spark}${esc(i.reason)}</span><div class="fab"><button class="facc${v === 'accept' ? ' on' : ''}" data-lv="dec" data-v="${i.exercise_id}|accept">${I().check}${v === 'accept' ? 'Accepted' : 'Accept'}</button><button class="frej${v === 'reject' ? ' on' : ''}" data-lv="dec" data-v="${i.exercise_id}|reject">${v === 'reject' ? 'Rejected' : 'Reject'}</button></div></div>` : `<div class="fwhy"><span class="fwt">${esc(i.reason)}</span></div>`}</div>`;
     }).join('');
     return { rows, und, acc };
   }
 
+  function assessmentNeeded(P, req) {
+    return head(P.patient, 'list') + `<div class="card pad sec2"><h2>Clinical review needed</h2>
+      <p>${esc(req.draft.note_for_pt)}</p><button class="btn" data-lv="go" data-v="visit">Open clinic visit</button></div>`;
+  }
+
   function planView() {   // first-plan draft
     const P = PTL.cache.profile[PTL.pid], req = PTL.cache.request[PTL.pid];
     if (!P) return errBox();
     if (!req) return head(P.patient, 'list') + `<div class="card pad" style="margin-top:20px"><h2>No draft waiting</h2><p class="sub">Fill in the clinic visit, then press "Draft plan with AI".</p><div class="foot"><button class="btn" data-lv="go" data-v="visit">Go to the visit</button></div></div>`;
+    if (req.draft.review_required) return assessmentNeeded(P, req);
     const { rows, und, acc } = suggestions(req);
     const src = srcLabel(req);
     return head(P.patient, 'list', 'Step 3 of 3: first plan') + `<div class="grid2" style="margin-top:20px"><div class="card pad ai"><div class="aihd"><span class="spark">${I().spark}</span><h2>Week 1 plan</h2><span class="tag new" style="margin-left:auto">${src}</span></div>
@@ -173,6 +203,7 @@
     if (!P) return errBox();
     if (!req) return head(P.patient, 'list') + `<div class="card pad" style="margin-top:20px"><h2>No weekly draft waiting</h2><p class="sub">A draft is made at the start of each week from last week's sessions.</p><div class="foot"><button class="btn" data-lv="redraft">Draft from the latest sessions</button></div></div>`;
     if (req.kind === 'first') { A().S.view = 'plan'; return planView(); }
+    if (req.draft.review_required) return assessmentNeeded(P, req);
     const s = req.summary;
     const days = []; for (let d = new Date(s.week.start + 'T12:00:00'); d <= new Date(s.week.end + 'T12:00:00'); d.setDate(d.getDate() + 1)) days.push(d.toISOString().slice(0, 10));
     const byDate = Object.fromEntries(P.sessions.map(x => [x.date, x]));
@@ -380,15 +411,29 @@
     const num = k => v(k) === '' ? null : Number(v(k));
     const lines = k => v(k) ? v(k).split('\n').map(x => x.trim()).filter(Boolean) : null;
     const sw = (v('sw_r') && v('sw_l')) ? { right: Number(v('sw_r')), left: Number(v('sw_l')) } : null;
-    return { bend_deg: num('bend_deg'), short_of_straight_deg: num('short_of_straight_deg'), rom_mode: v('rom_mode') || null,
+    const knee = {pathway: v('kg_pathway')};
+    if (knee.pathway === 'general') {
+      for (const key of ['pattern', 'clearance', 'loading', 'bend_position']) knee[key] = v('kg_' + key);
+      knee.findings = Array.from(document.querySelectorAll('[data-kg-finding]:checked'), box => box.dataset.kgFinding);
+      knee.sets = num('kg_sets');
+      knee.reps = num('kg_reps');
+    }
+    return { ...(knee.pathway ? {knee_assessment:knee} : {}), bend_deg: num('bend_deg'), short_of_straight_deg: num('short_of_straight_deg'), rom_mode: v('rom_mode') || null,
       quad_lag: v('quad_lag') === '' ? null : v('quad_lag') === 'yes', quad_grade: v('quad_grade') || null, pain_today: num('pain_today'),
       tug_sec: num('tug_sec'), chair_stand_30s: num('chair_stand_30s'), walking_aid: v('walking_aid') || null, stairs: v('stairs') || null,
       swelling_cm: sw, incision: v('incision') || null, goals_week6: lines('goals_week6'), precautions: lines('precautions'), notes: v('notes') || null };
   }
-  async function saveFindings() {
+  let saveQueue = Promise.resolve();
+  function saveFindings() {
+    if (!document.getElementById('lvsave')) return Promise.resolve(false);
+    const pid = PTL.pid, fields = collectFindings();
+    saveQueue = saveQueue.catch(() => {}).then(() => sendFindings(pid, fields));
+    return saveQueue;
+  }
+  async function sendFindings(pid, fields) {
     const s = document.getElementById('lvsave');
-    try { await call('/api/visit/findings', { patient_id: PTL.pid, fields: collectFindings() }); if (s) s.innerHTML = I().check + 'Saved'; }
-    catch (e) { if (s) s.textContent = 'Not saved: ' + e.message; }
+    try { await call('/api/visit/findings', { patient_id: pid, fields }); if (s) s.innerHTML = I().check + 'Saved'; return true; }
+    catch (e) { if (s) s.textContent = 'Not saved: ' + e.message; return false; }
   }
 
   function busy(el) { el.disabled = true; el.textContent = 'Drafting… (AI can take ~10 s)'; }
@@ -413,13 +458,15 @@
         case 'addsave': {
           const name = document.getElementById('ap_name').value.trim();
           if (!name) { document.getElementById('ap_name').focus(); return; }
-          await call('/api/patients/add', { name, phone: document.getElementById('ap_phone').value, surgery_date: document.getElementById('ap_date').value,
-            side: document.getElementById('ap_side').value, surgery: 'Knee replacement' });
+          const general = document.getElementById('ap_path').value === 'general';
+          await call('/api/patients/add', { name, phone: document.getElementById('ap_phone').value, surgery_date: general ? '' : document.getElementById('ap_date').value,
+            side: document.getElementById('ap_side').value, surgery: general ? 'General knee' : 'Knee replacement' });
           PTL.addOpen = false; return open('list');
         }
         case 'dec': { const [id, v] = d.v.split('|'); PTL.dec[id] = PTL.dec[id] === v ? undefined : v; PTL.note = (document.getElementById('lvnote') || {}).value ?? PTL.note; S._keep = true; return A().render(); }
-        case 'firstdraft': { busy(el); clearTimeout(saveT); if (document.getElementById('lvsave')) await saveFindings();
-          await call('/api/first-plan/draft', { patient_id: PTL.pid }); return open('plan'); }
+        case 'firstdraft': { busy(el); clearTimeout(saveT); if (document.getElementById('lvsave') && !(await saveFindings())) { el.disabled = false; el.textContent = 'Draft plan with AI'; return; }
+          const result = await call('/api/first-plan/draft', { patient_id: PTL.pid });
+          return open(result.draft.kind === 'weekly' ? 'review' : 'plan'); }
         case 'redraft': { busy(el); const r = PTL.cache.request[PTL.pid];
           await call('/api/adjustment/draft', { patient_id: PTL.pid, week_end: r ? r.week_end : undefined }); return open('review'); }
         case 'send': case 'keep': {
@@ -467,7 +514,10 @@
       if (t.dataset.lvf !== undefined) { const s = document.getElementById('lvsave'); if (s) s.textContent = 'Saving…'; clearTimeout(saveT); saveT = setTimeout(saveFindings, 600); }
       if (t.dataset.lvpn !== undefined) { clearTimeout(saveT); saveT = setTimeout(() => call('/api/pt-notes', { patient_id: PTL.pid, text: t.value }).then(() => { const s = document.getElementById('lv_pns'); if (s) s.textContent = 'Saved'; }), 600); }
     }, true);
-    dev.addEventListener('change', ev => { if (ev.target.dataset.lvf !== undefined) { clearTimeout(saveT); saveFindings(); } }, true);
+    dev.addEventListener('change', ev => {
+      if (ev.target.id === 'ap_path') document.getElementById('ap_surgical_date').hidden = ev.target.value === 'general';
+      if (ev.target.id === 'lv_kg_pathway') document.getElementById('lv_kg_details').hidden = ev.target.value !== 'general';
+      if (ev.target.dataset.lvf !== undefined) { clearTimeout(saveT); saveFindings(); } }, true);
     // Side nav "Patients" goes to the live list.
     dev.addEventListener('click', ev => {
       const b = ev.target.closest('[data-go="list"],[data-go="wlist"],[data-go="msg"],[data-go="sched"]');

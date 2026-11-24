@@ -8,6 +8,7 @@ Flow:
 import datetime as dt
 import json
 import sqlite3
+import knee_rules
 from statistics import mean
 
 DB_PATH = "rehab.db"
@@ -99,7 +100,7 @@ NEW_COLUMNS = {
     "patients": [("dob", "TEXT"), ("phone", "TEXT"), ("status", "TEXT DEFAULT 'active'"), ("rest_days", "TEXT"),
                  ("pt_private_notes", "TEXT"), ("consent_json", "TEXT"), ("consent_at", "TEXT"),
                  ("created_at", "TEXT"), ("join_code", "TEXT")],
-    "checkins": [("worry_json", "TEXT"), ("pain_end", "INTEGER"), ("bothered_json", "TEXT"), ("end_note", "TEXT"),
+    "checkins": [("next_morning", "TEXT"), ("worry_json", "TEXT"), ("pain_end", "INTEGER"), ("bothered_json", "TEXT"), ("end_note", "TEXT"),
                  ("stopped_early", "INTEGER DEFAULT 0"), ("stop_reason", "TEXT"), ("stop_pain", "INTEGER"),
                  ("ended_at", "TEXT")],
     "exercise_logs": [("feeling", "TEXT"), ("note", "TEXT")],
@@ -153,7 +154,7 @@ DEFAULT_GOAL = "home"
 def connect(path=DB_PATH):
     con = sqlite3.connect(path, check_same_thread=False)  # Gradio calls from worker threads
     con.row_factory = sqlite3.Row
-    con.executescript(SCHEMA)
+    con.executescript(SCHEMA + knee_rules.SCHEMA)
     for table, cols in NEW_COLUMNS.items():
         have = {r["name"] for r in con.execute(f"PRAGMA table_info({table})")}
         for name, kind in cols:
@@ -250,7 +251,7 @@ def add_alert(con, patient_id, date, tier, reason, source=""):
                 (patient_id, date, tier, reason, source))
 
 
-def daily_checkin(con, patient_id, pain_today, date=None, pain_location="none", worry=None):
+def daily_checkin(con, patient_id, pain_today, date=None, pain_location="none", worry=None, next_morning=None):
     """Ask pain before the session; return today's plan with adjusted reps.
 
     worry: {"symptoms": [...from URGENT_SYMPTOMS], "other": "free text"} from "Is anything worrying you today?"
@@ -263,12 +264,21 @@ def daily_checkin(con, patient_id, pain_today, date=None, pain_location="none", 
         raise ValueError(f"No plan for {patient_id}. The PT must enter a plan first.")
     worry = worry or {}
     symptoms = [str(x).lower() for x in worry.get("symptoms") or []]
-    unknown = [x for x in symptoms if x not in URGENT_SYMPTOMS]
+    assessment = knee_rules.assessment(con, patient_id)
+    named = URGENT_SYMPTOMS + (list(knee_rules.GENERAL_URGENT) if assessment["pathway"] == "general" else [])
+    unknown = [x for x in symptoms if x not in named]
     if unknown:
-        raise ValueError(f"Unknown symptom(s) {unknown}. Use {URGENT_SYMPTOMS}, or put it in 'other'.")
+        raise ValueError(f"Unknown symptom(s) {unknown}. Use {named}, or put it in 'other'.")
     other = (worry.get("other") or "").strip()
     action, factor = rep_rule(pain_today)
-    if symptoms:
+    if next_morning not in (None, "unknown", "baseline", "worse"):
+        raise ValueError("Unknown next-morning response.")
+    hold = ""
+    if assessment["pathway"] == "general":
+        hold = knee_rules.session_hold(con, patient_id, assessment, current_plan(con, patient_id))
+        if any(x in knee_rules.GENERAL_URGENT for x in symptoms):
+            hold = "Arrange urgent medical assessment for the new knee symptoms before exercise."
+    if symptoms or hold:
         action, factor = "rest", 0.0
     con.execute(
         "INSERT INTO checkins (patient_id, date, pain_today, pain_location, action, rep_factor, worry_json)"
@@ -279,6 +289,10 @@ def daily_checkin(con, patient_id, pain_today, date=None, pain_location="none", 
         (patient_id, date, pain_today, pain_location, action, factor,
          json.dumps({"symptoms": symptoms, "other": other}) if (symptoms or other) else None),
     )
+    if next_morning is not None:
+        con.execute("UPDATE checkins SET next_morning=? WHERE patient_id=? AND date=?", (next_morning, patient_id, date))
+    if hold:
+        add_alert(con, patient_id, date, "urgent" if assessment["clearance"] == "urgent" else "review", hold, "knee_screen")
     if pain_today >= STOP_PAIN:
         add_alert(con, patient_id, date, "urgent", f"Pain {pain_today}/10 before session; exercise skipped today", "checkin")
     if symptoms:
@@ -305,7 +319,7 @@ def daily_checkin(con, patient_id, pain_today, date=None, pain_location="none", 
         "rest": "Please rest today. We've told your PT.",
     }
     return {"checkin_id": checkin_id, "date": date, "pain_today": pain_today, "urgent": action == "rest",
-            "action": action, "message": messages[action], "exercises": today}
+            "action": action, "message": hold or messages[action], "exercises": today}
 
 
 def log_exercise(con, checkin_id, result):
@@ -394,7 +408,7 @@ def weekly_summary(con, patient_id, week_end=None, days=7):
     s, e = start.isoformat(), end.isoformat()
 
     checkins = [dict(r) for r in con.execute(
-        "SELECT date, pain_today, pain_location, action, pain_end, bothered_json, stopped_early, worry_json FROM checkins"
+        "SELECT date, pain_today, pain_location, action, pain_end, bothered_json, stopped_early, worry_json, next_morning FROM checkins"
         " WHERE patient_id=? AND date BETWEEN ? AND ? ORDER BY date",
         (patient_id, s, e)).fetchall()]
     patient = con.execute("SELECT * FROM patients WHERE patient_id=?", (patient_id,)).fetchone()
@@ -457,6 +471,7 @@ def weekly_summary(con, patient_id, week_end=None, days=7):
         "week": {"start": s, "end": e},
         "days_checked_in": len(checkins),
         "pain_location_days": locations,
+        "next_morning": [c["next_morning"] or "unknown" for c in checkins],
         "days_reduced": sum(c["action"] == "reduced" for c in checkins),
         "days_rest": sum(c["action"] == "rest" for c in checkins),
         "pain_today_avg": round(mean(c["pain_today"] for c in checkins), 1) if checkins else None,
@@ -797,8 +812,14 @@ def validate_draft(draft, summary, fallback):
 def create_adjustment_request(con, patient_id, week_end=None, use_llm=True):
     """Build the weekly summary and goal-based draft, store it as a pending request for the PT."""
     summary = weekly_summary(con, patient_id, week_end)
-    rules = goal_draft(summary)
-    draft = (llm_draft(summary, rules) if use_llm else None) or dict(rules, ai_note=ai_note(use_llm))
+    assessment = knee_rules.assessment(con, patient_id)
+    if assessment["pathway"] == "replacement":
+        rules = goal_draft(summary)
+        draft = (llm_draft(summary, rules) if use_llm else None) or dict(rules, ai_note=ai_note(use_llm))
+    else:
+        summary["knee_assessment"] = assessment
+        draft = knee_rules.draft(con, patient_id, assessment, summary["goal"],
+                                 week=summary, use_llm=use_llm)
     con.execute("UPDATE adjustment_requests SET status='superseded' WHERE patient_id=? AND status='pending'"
                 " AND COALESCE(kind, 'weekly')='weekly'", (patient_id,))
     cur = con.execute(
@@ -844,6 +865,13 @@ def decide_request(con, request_id, approve, final_items=None, pt_name="PT", pt_
     if final_items is None and decisions:
         final_items = apply_decisions(draft_items, current_plan(con, req["patient_id"]), decisions)
     final_items = final_items if final_items is not None else draft_items
+    if approve:
+        assessment = knee_rules.assessment(con, req["patient_id"])
+        expected_path = json.loads(req["draft_json"]).get("pathway", "replacement")
+        if assessment["pathway"] != expected_path:
+            raise ValueError("The care pathway changed. Generate a fresh draft.")
+        if expected_path != "replacement":
+            knee_rules.check_approval(con, req, assessment, final_items, current_plan(con, req["patient_id"]))
     if approve and not any(int(i["sets"]) > 0 for i in final_items):
         raise ValueError("This plan has no exercises left. Keep at least one, or keep the current plan.")
     edited = int(json.dumps(final_items, sort_keys=True) != json.dumps(draft_items, sort_keys=True))
