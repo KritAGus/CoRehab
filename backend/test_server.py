@@ -267,7 +267,7 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/checkin":
                 today = rn.daily_checkin(con, body["patient_id"], int(body["pain_today"]),
                                          body.get("date") or None, body.get("pain_location", "none"),
-                                         body.get("worry"))
+                                         body.get("worry"), body.get("next_morning"))
                 return self._send(200, {"ok": True, **today})
             if path == "/api/session/end":
                 return self._send(200, rn.end_session(con, int(body["checkin_id"]), body["pain_end"],
@@ -289,7 +289,7 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/patients/add":
                 return self._send(200, {"ok": True, **clinic.add_patient_by_pt(
                     con, body["name"], body.get("phone"), body.get("surgery", "Knee replacement"),
-                    body["surgery_date"], body.get("side", "right"), body.get("dob"))})
+                    body.get("surgery_date"), body.get("side", "right"), body.get("dob"))})
             if path == "/api/consent":
                 return self._send(200, clinic.save_consent(con, body["patient_id"], body.get("items", [])))
             if path == "/api/setup-check":

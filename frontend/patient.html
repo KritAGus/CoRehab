@@ -1291,14 +1291,15 @@ function painGrid(k){let h='<div class="pain" role="radiogroup">';for(let v=0;v<
 const SYMIC={'Swelling':'<circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="3"/>','Redness or warmth':'<path d="M12 3c3 4 5 6.5 5 9.5a5 5 0 0 1-10 0C7 9.5 9 7 12 3z"/>','Fever':'<path d="M10 14V5a2 2 0 0 1 4 0v9a4 4 0 1 1-4 0z"/><path d="M12 9v7"/>','Calf pain':'<path d="M9 3v8c0 3 2 5 2 8v2h4"/><path d="M14 4l2 2M16 9l2 1"/>','Something else':'<path d="M4 20h4L19 9l-4-4L4 16z"/>'};
 function symChoices(k){const sel=S[k],none=sel.length===0&&S[k+'T'],yes=S[k+'Y']||sel.length>0;
  let h='<div class="yn2"><button class="ynb yes" data-symyes="'+k+'" aria-pressed="'+(yes&&!none)+'">'+ic('<circle cx="12" cy="12" r="9"/><path d="M8.5 16.5c1-1.2 2.2-1.8 3.5-1.8s2.5.6 3.5 1.8"/><path d="M9 10v.5M15 10v.5" stroke-width="2.8"/><path d="M7.5 8.7l2.5-1.2M16.5 8.7L14 7.5"/>',40,2)+'Yes, something\'s worrying</button><button class="ynb no" data-symno="'+k+'" aria-pressed="'+none+'">'+ic('<circle cx="12" cy="12" r="9"/><path d="M8.5 14.5c1 1.4 2.2 2 3.5 2s2.5-.6 3.5-2"/><path d="M9 9.5v.5M15 9.5v.5" stroke-width="2.8"/>',40,2)+'No, I feel okay</button></div>';
- if(yes&&!none){h+='<p class="q" style="font-size:22px;margin:24px 0 12px">What is it? Pick all that apply.</p><div class="symgrid">';SYMPTOMS.concat(['Something else']).forEach(s=>{h+='<button class="symc" data-sym="'+k+'" data-v="'+s+'" aria-pressed="'+sel.includes(s)+'"><span class="symi">'+ic(SYMIC[s],34,2.2)+'</span>'+s+'</button>';});h+='</div>';
+ if(yes&&!none){h+='<p class="q" style="font-size:22px;margin:24px 0 12px">What is it? Pick all that apply.</p><div class="symgrid">';SYMPTOMS.concat(k === 'symBefore' && window.CR && CR.home && CR.home.care_pathway === 'general' ? CR.generalUrgent : [], ['Something else']).forEach(s=>{h+='<button class="symc" data-sym="'+k+'" data-v="'+s+'" aria-pressed="'+sel.includes(s)+'"><span class="symi">'+ic(SYMIC[s] || SYMIC['Something else'],34,2.2)+'</span>'+s+'</button>';});h+='</div>';
   if(sel.includes('Something else'))h+=fup('<label class="q" for="'+k+'O" style="font-size:22px">Tell us what it is</label><input id="'+k+'O" data-symo="'+k+'" value="'+esc(S[k+'O']||'')+'" placeholder="For example: my knee feels stiff" style="width:100%;box-sizing:border-box;height:64px;padding:0 18px;border-radius:var(--r-md);border:1px solid var(--border-strong);font:inherit;font-size:22px;background:var(--raised)">');}
  return h;}
 V.painBefore=()=>{const ok=S.painBefore!==null&&S.symBeforeT;return `<div class="scr"><div class="top">${backBtn('tab:today')}<span style="flex:1"></span><button class="exitb" data-sexit aria-label="End session">End</button></div>
  <h1 style="margin:8px 0 0">Before you start</h1><div style="margin-top:24px"><p class="q">How does your knee feel right now?</p>${painGrid('painBefore')}</div>
+ ${window.CR && CR.home && CR.home.care_pathway === 'general' ? `<div style="margin-top:20px"><label class="q" for="kneeMorning">How did your knee feel the morning after your last exercise session?</label><select id="kneeMorning" style="display:block;font:inherit;padding:8px"><option value="unknown">First session or unsure</option><option value="baseline"${S.kneeMorning === 'baseline' ? ' selected' : ''}>Usual level or better</option><option value="worse"${S.kneeMorning === 'worse' ? ' selected' : ''}>Worse than usual</option></select></div>` : ''}
  <div style="margin-top:40px"><p class="q">Is anything worrying you today?</p>${symChoices('symBefore')}</div>
  <div class="foot">${sos(true)}<button class="main" id="painNext" ${ok?'':'disabled'}>Continue</button></div></div>`;};
-V.rest=()=>`<div class="scr"><div class="top">${backBtn('painBefore')}</div><div style="margin-top:20px"><h1>Let's rest today</h1><p class="sub">Your knee needs a break. We've let your PT know, and they may call you.</p></div>
+V.rest=()=>`<div class="scr"><div class="top">${backBtn('painBefore')}</div><div style="margin-top:20px"><h1>Let's rest today</h1><p class="sub">${esc(S.kneeHold || "Your knee needs a break. We've let your PT know, and they may call you.")}</p></div>
  <div class="ban urg" style="margin-top:40px"><div class="ic">${I.bang}</div><div><b>Call 911</b> if you have chest pain, trouble breathing, or your leg is suddenly very swollen.</div></div>
  <div class="ban ok" style="margin-top:16px"><div class="ic">${I.check}</div><div><b>Today won't break your streak.</b> Rest days count when your knee needs them.</div></div>
  <div class="foot"><span></span><button class="main" data-tab="today">Back to home</button></div></div>`;
@@ -1426,7 +1427,7 @@ function go(scr){clearT();S.paused=false;S.ending=false;S.sexit=false;S.resting=
  if(scr.startsWith('tab:')){toTab(scr.slice(4));return;}
  if(TABS.includes(scr)||scr==='exdetail'){toTab(scr);return;}
  if(scr==='myplan'&&S.screen==='tabs'&&S.tab!=='exdetail')S.planFrom='tab:'+S.tab;
- if(scr==='painBefore'){S.painBefore=null;S.symBefore=[];S.symBeforeT=false;}
+ if(scr==='painBefore'){S.kneeMorning='unknown';S.kneeHold='';S.painBefore=null;S.symBefore=[];S.symBeforeT=false;}
  if(scr==='setup'){S.inFrame=false;S.countdown=null;}
  S.screen=scr;render();}
 
@@ -1461,7 +1462,7 @@ function finishSession(early){S.streak++;S.medalNew=MEDALS.find(m=>m.at===S.stre
 
 dev.addEventListener('click',ev=>{
  const b=ev.target.closest('button');if(!b)return;const d=b.dataset;
- if(window.CR)CR.beforeClick(b,d); /* CoRehab: send to the server (patient-live.js) */
+ if(window.CR && CR.beforeClick(b,d) === true)return; /* CoRehab: send to the server (patient-live.js) */
  if(d.tab){toTab(d.tab);return;}
  if(d.obstart!==undefined){S.ob=obFresh();S.obpain=null;go('onboard');return;}
  if(d.obscan!==undefined){S.ob.scanning=true;render();later(()=>{S.ob.scanning=false;S.ob.joined=true;render();},1600);return;}
